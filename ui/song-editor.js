@@ -10,7 +10,7 @@ function removeSection(sections,id){return sections.filter(s=>s.id!==id).map(cop
 function node(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
 class SongEditor {
   constructor(onChange, api){
-    this.onChange=onChange;this.api=api;this.sections=[];this.mode='sections';this.types=[];
+    this.advice=new Map();this.aiBusy=false;this.aiConfigured=false;this.onChange=onChange;this.api=api;this.sections=[];this.mode='sections';this.types=[];
     this.revision=0;this.timer=null;this.removed=null;this.composing=false;this.pending=null;
     this.host=document.getElementById('section-cards');this.raw=document.getElementById('raw-lyrics');
     this.preview=document.getElementById('compiled-preview');
@@ -30,19 +30,20 @@ class SongEditor {
       for(const t of this.types){const option=node('option',t.label);option.value=t.type;select.append(option);}
       select.value='verse';document.getElementById('add-section').disabled=false;
       this.render();this.schedule();
+      try{const status=await this.api('/api/advisor');this.aiConfigured=status.configured;this.aiModel=status.model;this.paintAdvice();}catch{this.aiConfigured=false;this.paintAdvice();}
     }catch(e){document.getElementById('editor-error').textContent='가이드 연결 실패: '+e.message;}
   }
   song(){return {schema_version:2,title:document.getElementById('title').value.trim(),sections:copy(this.sections),music_settings:{advanced_prompt:document.getElementById('style').value.trim()}};}
   draft(){return {mode:this.mode,sections:copy(this.sections),raw:document.getElementById('lyrics').value};}
   load(data){
-    this.revision++;clearTimeout(this.timer);this.removed=null;
+    this.revision++;this.advice.clear();clearTimeout(this.timer);this.removed=null;
     if(data.editor && (!Array.isArray(data.editor.sections) || data.editor.sections.length>64 || !data.editor.sections.every(s=>s && typeof s.id==='string' && typeof s.type==='string' && typeof s.label==='string' && Array.isArray(s.lyrics) && s.lyrics.every(l=>typeof l==='string'))))throw new Error('저장된 편집 초안 형식이 잘못됐습니다.');
     if(data.editor){this.mode=data.editor.mode==='raw'?'raw':'sections';this.sections=copy(data.editor.sections||[]);document.getElementById('lyrics').value=data.editor.raw||'';}
     else if(data.song){this.sections=copy(data.song.sections);this.mode='sections';}
     else {this.mode='raw';this.sections=[];if(data.lyrics!==undefined)document.getElementById('lyrics').value=data.lyrics;}
     this.render();this.schedule();
   }
-  changed(){this.revision++;if(!this.composing){this.onChange();this.schedule();}}
+  changed(){this.revision++;this.paintAdvice();if(!this.composing){this.onChange();this.schedule();}}
   schedule(){clearTimeout(this.timer);this.timer=setTimeout(()=>this.analyze(),300);}
   async analyze(){
     const revision=this.revision;
@@ -85,11 +86,63 @@ class SongEditor {
       const info=this.types.find(t=>t.type===s.type);guide.append(node('p',info?.description||'가이드를 불러오는 중입니다.'));
       for(const opt of info?.options||[]){const item=node('div',undefined,'guide-option');const choose=node('button',opt.bars+' bars','quiet-button');choose.type='button';choose.onclick=()=>{s.bars=opt.bars;bars.value=opt.bars;this.changed();};item.append(choose,node('span',opt.reason));guide.append(item);}
       card.append(guide);
+      const assistant=node('section',undefined,'ai-assistant');assistant.append(node('h4','AI Lyrics Assistant'));
+      assistant.append(node('p','요청하면 이 Section의 가사·구조와 곡 제목·스타일이 Google Gemini로 전송됩니다. 자동 적용하지 않습니다.','field-foot'));
+      const aiActions=node('div',undefined,'section-actions');
+      for(const [action,title] of [['review','가사 검토'],['suggest','다음 1~2줄 제안']]){
+        const button=node('button',title,'quiet-button ai-request');button.type='button';button.dataset.action=action;
+        button.onclick=()=>this.askAdvice(s.id,action);aiActions.append(button);
+      }
+      assistant.append(aiActions,node('p','','ai-status'),node('div',undefined,'advice-list'));card.append(assistant);
       const actions=node('div',undefined,'section-actions');
       for(const [text,delta] of [['↑ 위로',-1],['↓ 아래로',1]]){const b=node('button',text,'quiet-button');b.type='button';b.disabled=index+delta<0||index+delta>=this.sections.length;b.setAttribute('aria-label',(index+1)+'번 Section '+text);
         b.onclick=()=>{this.sections=moveSection(this.sections,s.id,delta);this.render();this.changed();const c=Array.from(this.host.children).find(n=>n.dataset.id===s.id);c?.querySelector('textarea').focus();};actions.append(b);}
       const del=node('button','삭제','quiet-button');del.type='button';del.setAttribute('aria-label',(index+1)+'번 Section 삭제');del.onclick=()=>{this.removed={section:copy(s),index};this.sections=removeSection(this.sections,s.id);this.render();this.changed();document.getElementById('undo-section').focus();};actions.append(del);card.append(actions);this.host.append(card);
     }
+    this.paintAdvice();
+  }
+  paintAdvice(){
+    for(const card of this.host.querySelectorAll('.song-section')){
+      const entry=this.advice.get(card.dataset.id);
+      const status=card.querySelector('.ai-status');if(!status)continue;
+      for(const b of card.querySelectorAll('.ai-request'))b.disabled=this.aiBusy||!this.aiConfigured;
+      status.textContent=entry?.loading?'Gemini가 검토 중입니다…':entry?.error||(!this.aiConfigured?'Gemini 키 설정 후 서버를 재시작해 주세요.':entry?.items?.length===0?'추가 수정 제안이 없습니다.':this.aiModel||'');
+      const list=card.querySelector('.advice-list');list.replaceChildren();
+      for(const item of entry?.items||[]){
+        const box=node('article',undefined,'suggestion');
+        box.append(node('strong',entry.action==='suggest'?'다음 행 추가':(item.line_index+1)+'행 수정'));
+        for(const [label,value] of [['원문',item.original||'(Section 끝에 추가)'],['제안',item.suggested],['이유',item.reason]])box.append(node('h5',label),node('p',value));
+        const stale=entry.revision!==this.revision;
+        if(stale)box.append(node('p','요청 후 내용이 변경됐습니다. 다시 검토해 주세요.','stale-advice'));
+        const apply=node('button','적용','quiet-button');apply.type='button';apply.disabled=stale;
+        apply.onclick=()=>this.applyAdvice(card.dataset.id,item,entry);
+        const ignore=node('button','무시','quiet-button');ignore.type='button';ignore.onclick=()=>{entry.items=entry.items.filter(x=>x.id!==item.id);this.paintAdvice();};
+        box.append(apply,ignore);list.append(box);
+      }
+    }
+  }
+  async askAdvice(id,action){
+    if(this.aiBusy||!this.aiConfigured)return;
+    const section=this.sections.find(s=>s.id===id);if(!section)return;
+    const entry={revision:this.revision,action,items:[],loading:true};this.advice.set(id,entry);this.aiBusy=true;this.paintAdvice();
+    try{
+      const response=await this.api('/api/advisor',{action,section:copy(section),context:{title:document.getElementById('title').value.trim(),style:document.getElementById('style').value.trim()}});
+      entry.items=response.suggestions;
+    }catch(e){entry.error=e.message;}
+    finally{entry.loading=false;this.aiBusy=false;this.paintAdvice();}
+  }
+  applyAdvice(id,item,entry){
+    const section=this.sections.find(s=>s.id===id);
+    if(!section||this.mode!=='sections'||entry.revision!==this.revision)return;
+    if(entry.action==='review'){
+      if(section.lyrics[item.line_index]!==item.original)return;
+      section.lyrics[item.line_index]=item.suggested;
+    }else{
+      if(item.line_index!==section.lyrics.length||item.original!=='')return;
+      section.lyrics.push(...item.suggested.split('\n'));
+    }
+    entry.items=entry.items.filter(x=>x.id!==item.id);
+    this.render();this.changed();
   }
   add(){
     if(this.sections.length>=64){document.getElementById('editor-error').textContent='Section은 최대 64개입니다.';return;}

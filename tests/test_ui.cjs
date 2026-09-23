@@ -5,11 +5,11 @@ const path=require('node:path');
 const {JSDOM}=require(require.resolve('jsdom',{paths:[process.env.MUSIC_STUDIO_TEST_DEPS||path.join(__dirname,'../outputs/ui-test')]}));
 const base='http://127.0.0.1:7860';
 async function until(fn){for(let i=0;i<100;i++){if(fn())return;await new Promise(r=>setTimeout(r,20));}throw new Error('UI condition timed out');}
-async function setup(draft){
+async function setup(draft,advisor){
  const dom=new JSDOM(fs.readFileSync(path.join(__dirname,'../ui/index.html'),'utf8'),{url:base,runScripts:'outside-only'});
  const w=dom.window;const jobs=[];w.confirm=()=>true;w.HTMLElement.prototype.scrollIntoView=()=>{};
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;};
- w.fetch=async(p,options)=>{if(p==='/api/jobs'){jobs.push(JSON.parse(options.body));return {ok:true,json:async()=>({id:'test'})};}const response=await fetch(new URL(p,base),options);if(p==='/api/state'){const state=await response.json();return {ok:true,json:async()=>({...state,job:null,busy:false})};}return response;};
+ w.fetch=async(p,options)=>{if(advisor&&p==='/api/advisor'){return {ok:true,json:async()=>options?.body?advisor(JSON.parse(options.body)):{configured:true,model:'test'}};}if(p==='/api/jobs'){jobs.push(JSON.parse(options.body));return {ok:true,json:async()=>({id:'test'})};}const response=await fetch(new URL(p,base),options);if(p==='/api/state'){const state=await response.json();return {ok:true,json:async()=>({...state,job:null,busy:false})};}return response;};
  if(draft)w.localStorage.setItem('music-studio-draft',JSON.stringify(draft));
  w.eval(fs.readFileSync(path.join(__dirname,'../ui/song-editor.js'),'utf8'));
  w.eval(fs.readFileSync(path.join(__dirname,'../ui/app.js'),'utf8'));
@@ -63,5 +63,41 @@ test('legacy draft preserved; import applies only after explicit confirmation',a
   assert.equal(d.querySelectorAll('.song-section').length,2);
   assert.ok(d.querySelectorAll('.song-section textarea')[1].value.includes('[Special]'));
   assert.equal(JSON.parse(w.localStorage.getItem('music-studio-draft')).lyrics,legacy.lyrics);
+ }finally{dom.window.close();}
+});
+
+test('AI suggestions require apply; ignore and stale replies preserve lyrics',async()=>{
+ let release;
+ const advisor=async payload=>{
+   if(release==='delay')await new Promise(resolve=>{release=resolve;});
+   const line=payload.section.lyrics[0]||'';
+   return {suggestions:[{id:'test-suggestion',section_id:payload.section.id,line_index:payload.action==='suggest'?payload.section.lyrics.length:0,
+     original:payload.action==='suggest'?'':line,suggested:payload.action==='suggest'?'새로운 첫 줄\n새로운 둘째 줄':'고요한 이 밤',reason:'표현 제안',source_revision:'test'}]};
+ };
+ const {dom,w,d}=await setup(undefined,advisor);
+ try{
+   d.getElementById('add-section').click();
+   await until(()=>!d.querySelector('.ai-request').disabled);
+   input(w,d.querySelector('#section-cards textarea'),'조용한 밤');
+   const clickReview=()=>d.querySelector('[data-action="review"]').click();
+   clickReview();await until(()=>d.querySelector('.suggestion'));
+   assert.equal(d.querySelector('#section-cards textarea').value,'조용한 밤');
+   d.querySelector('.suggestion button:last-child').click();
+   assert.equal(d.querySelector('.suggestion'),null);
+   clickReview();await until(()=>d.querySelector('.suggestion'));
+   input(w,d.querySelector('#section-cards textarea'),'사용자 직접 수정');
+   assert.equal(d.querySelector('.suggestion button').disabled,true);
+   assert.equal(d.querySelector('#section-cards textarea').value,'사용자 직접 수정');
+   clickReview();await until(()=>d.querySelector('.suggestion button:not(:disabled)'));
+   d.querySelector('.suggestion button').click();
+   assert.equal(d.querySelector('#section-cards textarea').value,'고요한 이 밤');
+   d.querySelector('[data-action="suggest"]').click();await until(()=>d.querySelector('.suggestion'));
+   d.querySelector('.suggestion button').click();
+   assert.equal(d.querySelector('#section-cards textarea').value,'고요한 이 밤\n새로운 첫 줄\n새로운 둘째 줄');
+   release='delay';clickReview();await until(()=>typeof release==='function');
+   input(w,d.querySelector('#section-cards textarea'),'응답 전에 편집');
+   release();await until(()=>d.querySelector('.suggestion'));
+   assert.equal(d.querySelector('.suggestion button').disabled,true);
+   assert.equal(d.querySelector('#section-cards textarea').value,'응답 전에 편집');
  }finally{dom.window.close();}
 });

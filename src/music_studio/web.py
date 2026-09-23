@@ -14,6 +14,8 @@ from . import cli, metadata
 from .lyrics.guides import workshop
 from .lyrics.importer import import_lyrics
 from .domain.section import text
+from .lyrics.gemini import GeminiAdvisor, AdvisorError
+from .settings import gemini_settings
 
 UI = cli.ROOT / "ui"
 RUN_ID = re.compile(r"\d{4}-\d{2}-\d{2}/\d{6}-[a-f0-9]{8}\Z")
@@ -25,7 +27,8 @@ class BusyError(ValueError):
 
 
 class Studio:
-    def __init__(self, config, output_root, generator=cli.generate):
+    def __init__(self, config, output_root, generator=cli.generate, advisor=None):
+        self.advisor = advisor or GeminiAdvisor()
         self.config = config
         self.output_root = Path(output_root).resolve()
         self.generator = generator
@@ -159,7 +162,9 @@ def make_handler(studio):
                 return
             url = urlsplit(self.path)
             try:
-                if url.path == "/api/workshop":
+                if url.path == "/api/advisor":
+                    self.respond(studio.advisor.status())
+                elif url.path == "/api/workshop":
                     self.respond(workshop())
                 elif url.path == "/api/state":
                     try:
@@ -268,6 +273,9 @@ def make_handler(studio):
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
                     raise ValueError("잘못된 입력입니다.")
+                if self.path == "/api/advisor":
+                    self.respond(studio.advisor.request(data.get("action"), data.get("section"), data.get("context", {})))
+                    return
                 if self.path == "/api/song/preview":
                     self.respond(metadata.preview(data.get("song")))
                     return
@@ -288,6 +296,8 @@ def make_handler(studio):
                     self.respond({"error": "페이지가 없습니다."}, 404)
                     return
                 self.respond(job, 202)
+            except AdvisorError as e:
+                self.respond({"error": str(e)}, e.status)
             except BusyError as e:
                 self.respond({"error": str(e)}, 409)
             except (ValueError, KeyError, OSError) as e:
@@ -303,7 +313,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Local AI Music Studio web UI")
     parser.add_argument("--port", type=int, default=7860)
     args = parser.parse_args(argv)
-    studio = Studio(cli.read_json(cli.ROOT / "config/local.json"), cli.ROOT / "outputs")
+    key, model = gemini_settings(cli.ROOT)
+    studio = Studio(cli.read_json(cli.ROOT / "config/local.json"), cli.ROOT / "outputs", advisor=GeminiAdvisor(key, model))
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(studio))
     print(f"Music Studio: http://127.0.0.1:{args.port}", flush=True)
     try:
