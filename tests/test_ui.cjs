@@ -132,3 +132,37 @@ for(const [action,label] of [['rhyme','라임'],['hook','Hook 강화']]){
    }finally{dom.window.close();}
  });
 }
+
+for(const action of ['review','rhyme','hook']){
+ test(action+' applies in place and keeps independent suggestions usable',async()=>{
+   const advisor=async payload=>({suggestions:[
+     {id:'second',type:action==='review'?'expression':action,line_index:1,original:payload.section.lyrics[1],suggested:'두 번째 행 수정',reason:'두 번째 행 제안'},
+     {id:'first',type:action==='review'?'expression':action,line_index:0,original:payload.section.lyrics[0],suggested:'첫 번째 행 수정',reason:'첫 번째 행 제안'},
+     {id:'alternative',type:action==='review'?'expression':action,line_index:0,original:payload.section.lyrics[0],suggested:'첫 번째 행 다른 대안',reason:'동일 행 대안'}
+   ]});
+   const {dom,w,d,jobs}=await setup(undefined,advisor);
+   try{
+     d.getElementById('add-section').click();
+     await until(()=>!d.querySelector('.ai-request').disabled);
+     const area=d.querySelector('#section-cards textarea');
+     input(w,area,'같은 원문\n같은 원문\n유지할 행');
+     d.querySelector('[data-action="'+action+'"]').click();
+     await until(()=>d.querySelectorAll('.suggestion').length===3);
+     d.querySelector('.suggestion button').click();
+     assert.equal(area.value,'같은 원문\n두 번째 행 수정\n유지할 행');
+     assert.equal(d.querySelector('#section-cards textarea'),area);
+     assert.equal(d.querySelector('.suggestion button').disabled,false);
+     d.querySelector('.suggestion button').click();
+     assert.equal(area.value,'첫 번째 행 수정\n두 번째 행 수정\n유지할 행');
+     assert.equal(d.querySelector('.suggestion button').disabled,true);
+     const draft=JSON.parse(w.localStorage.getItem('music-studio-draft-v3'));
+     assert.deepEqual(draft.editor.sections[0].lyrics,['첫 번째 행 수정','두 번째 행 수정','유지할 행']);
+     await until(()=>d.getElementById('compiled-preview').textContent.includes('첫 번째 행 수정\n두 번째 행 수정'));
+     input(w,area,area.value+'\n직접 추가');
+     assert.equal(JSON.parse(w.localStorage.getItem('music-studio-draft-v3')).editor.sections[0].lyrics[3],'직접 추가');
+     d.getElementById('composer').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+     await until(()=>jobs.length===1);
+     assert.deepEqual(jobs[0].song.sections[0].lyrics,['첫 번째 행 수정','두 번째 행 수정','유지할 행','직접 추가']);
+   }finally{dom.window.close();}
+ });
+}

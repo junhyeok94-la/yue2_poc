@@ -107,7 +107,7 @@ class SongEditor {
       const entry=this.advice.get(card.dataset.id);
       const status=card.querySelector('.ai-status');if(!status)continue;
       for(const b of card.querySelectorAll('.ai-request'))b.disabled=this.aiBusy||!this.aiConfigured;
-      status.textContent=entry?.loading?'Gemini가 검토 중입니다…':entry?.error||(!this.aiConfigured?'Gemini 키 설정 후 서버를 재시작해 주세요.':entry?.items?.length===0?'추가 수정 제안이 없습니다.':this.aiModel||'');
+      status.textContent=entry?.loading?'Gemini가 검토 중입니다…':entry?.error||entry?.message||(!this.aiConfigured?'Gemini 키 설정 후 서버를 재시작해 주세요.':entry?.items?.length===0?'추가 수정 제안이 없습니다.':this.aiModel||'');
       const list=card.querySelector('.advice-list');list.replaceChildren();
       for(const item of entry?.items||[]){
         const box=node('article',undefined,'suggestion');
@@ -115,8 +115,8 @@ class SongEditor {
         box.append(node('span',kind,'mini-label'));
         box.append(node('strong',entry.action==='suggest'?'다음 행 추가':(item.line_index+1)+'행 수정'));
         for(const [label,value] of [['원문',item.original||'(Section 끝에 추가)'],['제안',item.suggested],['이유',item.reason]])box.append(node('h5',label),node('p',value));
-        const stale=entry.revision!==this.revision;
-        if(stale)box.append(node('p','요청 후 내용이 변경됐습니다. 다시 검토해 주세요.','stale-advice'));
+        const stale=!this.canApplyAdvice(card.dataset.id,item,entry);
+        if(stale)box.append(node('p','대상 원문이 변경됐거나 같은 행의 다른 제안을 적용했습니다. 다시 검토해 주세요.','stale-advice'));
         const apply=node('button','적용','quiet-button');apply.type='button';apply.disabled=stale;
         apply.onclick=()=>this.applyAdvice(card.dataset.id,item,entry);
         const ignore=node('button','무시','quiet-button');ignore.type='button';ignore.onclick=()=>{entry.items=entry.items.filter(x=>x.id!==item.id);this.paintAdvice();};
@@ -134,18 +134,34 @@ class SongEditor {
     }catch(e){entry.error=e.message;}
     finally{entry.loading=false;this.aiBusy=false;this.paintAdvice();}
   }
-  applyAdvice(id,item,entry){
+  canApplyAdvice(id,item,entry){
     const section=this.sections.find(s=>s.id===id);
-    if(!section||this.mode!=='sections'||entry.revision!==this.revision)return;
-    if(entry.action!=='suggest'){
-      if(section.lyrics[item.line_index]!==item.original)return;
-      section.lyrics[item.line_index]=item.suggested;
-    }else{
-      if(item.line_index!==section.lyrics.length||item.original!=='')return;
-      section.lyrics.push(...item.suggested.split('\n'));
-    }
+    if(!section||this.mode!=='sections'||this.composing||this.advice.get(id)!==entry||entry.revision!==this.revision)return false;
+    if(!entry.items.some(value=>value.id===item.id))return false;
+    return entry.action==='suggest'
+      ? item.line_index===section.lyrics.length&&item.original===''
+      : section.lyrics[item.line_index]===item.original;
+  }
+  applyAdvice(id,item,entry){
+    if(!this.canApplyAdvice(id,item,entry)){this.paintAdvice();return;}
+    const section=this.sections.find(s=>s.id===id);
+    if(entry.action!=='suggest')section.lyrics[item.line_index]=item.suggested;
+    else section.lyrics.push(...item.suggested.split('\n'));
     entry.items=entry.items.filter(x=>x.id!==item.id);
-    this.render();this.changed();
+    // Only this accepted batch advances. Manual edits and other pending requests
+    // retain their older revision; same-line alternatives fail the source check.
+    entry.revision=this.revision+1;
+    entry.message=entry.action==='suggest'?'새 가사를 끝에 추가했습니다.':(item.line_index+1)+'행에 제안을 적용했습니다.';
+    const card=Array.from(this.host.children).find(n=>n.dataset.id===id);
+    const area=card?.querySelector('textarea');
+    if(area){
+      const scroll=area.scrollTop;
+      area.value=section.lyrics.join('\n');
+      const start=section.lyrics.slice(0,item.line_index).reduce((sum,line)=>sum+line.length+1,0);
+      area.setSelectionRange(start,start+item.suggested.length);
+      area.scrollTop=scroll;
+    }
+    this.changed();
   }
   add(){
     if(this.sections.length>=64){document.getElementById('editor-error').textContent='Section은 최대 64개입니다.';return;}
