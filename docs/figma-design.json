@@ -1,0 +1,9 @@
+{
+  "file_key": "gKvtbRwlaaDLsVJRsuWKPe",
+  "url": "https://www.figma.com/design/gKvtbRwlaaDLsVJRsuWKPe?node-id=3-9",
+  "title": "Local AI Music Studio — Phase 2",
+  "frame": "3:9",
+  "nodes": {"header": "3:10", "workspace": "3:11", "composer": "3:15", "library": "3:17", "player": "3:529"},
+  "font": "IBM Plex Sans KR",
+  "status": "Design created and screenshots inspected. get_design_context blocked by Starter MCP rate limit; final implementation sync not verified."
+}

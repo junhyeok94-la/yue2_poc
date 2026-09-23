@@ -1,0 +1,137 @@
+[
+  {
+    "id": "213622-7eb487ea",
+    "status": "succeeded",
+    "title": "River Lights - English smoke test",
+    "cot": "off",
+    "elapsed_seconds": 67.281,
+    "wav": {
+      "frames": 3438656,
+      "sample_rate": 48000,
+      "channels": 2,
+      "sample_width": 2,
+      "duration_seconds": 71.63866666666667
+    },
+    "gpu": {
+      "scope": "whole GPU, sampled every ~1s; not process-only or exact peak",
+      "sample_count": 57,
+      "peak_device_used_mib": {
+        "0": 5301
+      },
+      "errors": []
+    },
+    "metadata": "outputs/2026-09-23/213622-7eb487ea/metadata.json",
+    "audio_sha256": "5f8cc9eec4489a4a7992f5ac6ef028dec689045991781c9071a8650d71e32615",
+    "pcm_peak": 32767,
+    "pcm_rms": 5060.460656733543,
+    "cuda_log_evidence": true
+  },
+  {
+    "id": "213825-7e754352",
+    "status": "succeeded",
+    "title": "새벽의 강 - Korean smoke test",
+    "cot": "off",
+    "elapsed_seconds": 48.969,
+    "wav": {
+      "frames": 2390336,
+      "sample_rate": 48000,
+      "channels": 2,
+      "sample_width": 2,
+      "duration_seconds": 49.79866666666667
+    },
+    "gpu": {
+      "scope": "whole GPU, sampled every ~1s; not process-only or exact peak",
+      "sample_count": 40,
+      "peak_device_used_mib": {
+        "0": 5162
+      },
+      "errors": []
+    },
+    "metadata": "outputs/2026-09-23/213825-7e754352/metadata.json",
+    "audio_sha256": "1985523192a79da33175d3ec18bba9863d1d066bef8827129a0ede0d729ab069",
+    "pcm_peak": 30447,
+    "pcm_rms": 5508.803888201481,
+    "cuda_log_evidence": true
+  },
+  {
+    "id": "213921-5fbd0c62",
+    "status": "succeeded",
+    "title": "River Lights - English smoke test",
+    "cot": "off",
+    "elapsed_seconds": 66.938,
+    "wav": {
+      "frames": 3438656,
+      "sample_rate": 48000,
+      "channels": 2,
+      "sample_width": 2,
+      "duration_seconds": 71.63866666666667
+    },
+    "gpu": {
+      "scope": "whole GPU, sampled every ~1s; not process-only or exact peak",
+      "sample_count": 57,
+      "peak_device_used_mib": {
+        "0": 5201
+      },
+      "errors": []
+    },
+    "metadata": "outputs/2026-09-23/213921-5fbd0c62/metadata.json",
+    "audio_sha256": "5f8cc9eec4489a4a7992f5ac6ef028dec689045991781c9071a8650d71e32615",
+    "pcm_peak": 32767,
+    "pcm_rms": 5060.460656733543,
+    "cuda_log_evidence": true
+  },
+  {
+    "id": "214028-f37ac422",
+    "status": "succeeded",
+    "title": "River Lights - English smoke test",
+    "cot": "off",
+    "elapsed_seconds": 63.672,
+    "wav": {
+      "frames": 3438656,
+      "sample_rate": 48000,
+      "channels": 2,
+      "sample_width": 2,
+      "duration_seconds": 71.63866666666667
+    },
+    "gpu": {
+      "scope": "whole GPU, sampled every ~1s; not process-only or exact peak",
+      "sample_count": 53,
+      "peak_device_used_mib": {
+        "0": 5196
+      },
+      "errors": []
+    },
+    "metadata": "outputs/2026-09-23/214028-f37ac422/metadata.json",
+    "audio_sha256": "5f8cc9eec4489a4a7992f5ac6ef028dec689045991781c9071a8650d71e32615",
+    "pcm_peak": 32767,
+    "pcm_rms": 5060.460656733543,
+    "cuda_log_evidence": true
+  },
+  {
+    "id": "214148-120832df",
+    "status": "succeeded",
+    "title": "River Lights - long form with score planning",
+    "cot": "full",
+    "elapsed_seconds": 126.687,
+    "wav": {
+      "frames": 10220096,
+      "sample_rate": 48000,
+      "channels": 2,
+      "sample_width": 2,
+      "duration_seconds": 212.91866666666667
+    },
+    "gpu": {
+      "scope": "whole GPU, sampled every ~1s; not process-only or exact peak",
+      "sample_count": 112,
+      "peak_device_used_mib": {
+        "0": 7384
+      },
+      "errors": []
+    },
+    "metadata": "outputs/2026-09-23/214148-120832df/metadata.json",
+    "audio_sha256": "fb21cd28cad25f90c8d1c3085756fb788d8a6fac3992672aaff5cf9f73fc97a1",
+    "pcm_peak": 32767,
+    "pcm_rms": 6416.236673453009,
+    "cuda_log_evidence": true
+  }
+]

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Local Music Studio</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<header class="topbar"><a class="brand" href="/" aria-label="Local Music Studio 홈"><span class="brand-mark" aria-hidden="true">∿</span> LOCAL <span class="slash">/</span> MUSIC STUDIO</a><div class="connection"><span class="dot"></span><span id="connection">연결 중</span><span class="local-label">PRIVATE & LOCAL</span></div></header>
+<main>
+<section class="intro"><div><p class="eyebrow">YOUR WORDS. YOUR SOUND.</p><h1>상상이 음악이 되는 순간<span>.</span></h1><p>지금의 감정에 가사를 더해, 오직 당신만의 음악을 만드세요.</p></div><div class="session-label">LOCAL SESSION <span>01</span></div></section>
+<div class="workspace">
+<section class="composer panel" aria-labelledby="compose-title">
+<div class="section-head"><h2 id="compose-title">새로운 곡 만들기</h2><span class="mini-label">CREATE</span></div>
+<form id="composer">
+<label for="title">곡 제목</label><input id="title" name="title" maxlength="160" required placeholder="이번 곡의 이름을 지어주세요" value="새벽의 강">
+<div class="label-line"><label for="style">어떤 음악을 만들까요?</label><span>장르 · 분위기 · 보컬 · 악기</span></div>
+<textarea id="style" name="style" rows="3" maxlength="2000" required placeholder="예: Korean R&B, warm male vocal, electric piano">Korean, mellow R&B, warm male vocal, electric piano, soft bass, gentle drums</textarea>
+<div class="presets" aria-label="스타일 프리셋"><button type="button" data-preset="rnb">새벽 R&B</button><button type="button" data-preset="lofi">비 오는 카페</button><button type="button" data-preset="pop">산뜻한 팝</button><button type="button" data-preset="acoustic">어쿠스틱</button></div>
+<div class="label-line"><label for="lyrics">가사</label><button type="button" id="example" class="text-button">예시 가사 불러오기 ↗</button></div>
+<textarea id="lyrics" name="lyrics" class="lyrics" rows="9" maxlength="12000" required spellcheck="false" placeholder="[Verse]와 [Chorus]로 나누어 가사를 입력하세요.">[Verse]
+강물 위로 번져 가는 불빛 사이로
+오늘의 기억을 천천히 내려놓아
+
+[Chorus]
+조금 더 달려도 괜찮아
+새벽 끝엔 다시 아침이 오니까</textarea>
+<div class="field-foot"><span>가사는 직접 입력하거나 예시를 편집해 주세요.</span><span id="char-count">0 / 12,000</span></div>
+<details class="advanced"><summary>세부 생성 설정 <span>선택 사항</span></summary><div class="settings-grid">
+<div><label for="cot">곡 구성</label><select id="cot"><option value="off">바로 생성</option><option value="full">멜로디 + 화성 계획</option><option value="melody">멜로디 계획</option></select></div>
+<div><label for="seed">시드</label><input id="seed" type="number" min="0" max="2147483647" value="20260923" required></div>
+<div><label for="steps">합성 스텝</label><input id="steps" type="number" min="1" max="100" value="8" required></div>
+<div><label for="timeout">제한 시간 (초)</label><input id="timeout" type="number" min="1" max="86400" value="1800" required></div></div><p>같은 시드와 설정으로 결과를 비교할 수 있어요. 곡 길이는 가사와 모델에 따라 달라집니다.</p></details>
+<div id="form-error" class="error" role="alert" hidden></div>
+<button class="generate" id="generate" type="submit">음악 만들기 <span aria-hidden="true">↗</span></button>
+<p class="privacy-note">이 PC에서 생성하고, 이 PC에 저장합니다.</p>
+</form>
+</section>
+<section class="library" aria-labelledby="library-title">
+<div class="section-head"><div><span class="eyebrow">MADE BY YOU</span><h2 id="library-title">나의 라이브러리 <span id="track-count">0</span></h2></div><button id="refresh" class="quiet-button" type="button">새로고침 ↻</button></div>
+<section id="job-panel" class="job-panel" aria-live="polite" hidden><div class="job-top"><strong id="job-stage">모델 준비 중</strong><span id="job-time">0:00</span></div><p id="job-title"></p><div id="activity" class="activity"><span></span></div><p id="job-message">창을 새로고침해도 생성은 계속됩니다.</p><details><summary>실행 로그</summary><pre id="job-log"></pre></details></section>
+<label class="sr-only" for="search">곡 검색</label><input id="search" type="search" placeholder="제목이나 음악 스타일로 검색">
+<div class="filters" role="group" aria-label="라이브러리 필터"><button data-filter="all" class="active" aria-pressed="true">전체</button><button data-filter="succeeded" aria-pressed="false">완성된 곡</button><button data-filter="failed" aria-pressed="false">미완료</button></div>
+<div id="tracks" class="tracks" aria-live="polite"><p class="empty">음악을 불러오는 중입니다.</p></div>
+<section id="selected" class="selected panel" hidden><div class="selected-heading"><span class="eyebrow">TRACK NOTES</span><h3 id="selected-title"></h3></div><p id="selected-style"></p><div id="selected-stats" class="stats"></div><div class="track-actions"><button id="reuse" class="quiet-button">가사·설정 가져오기</button><button id="replay" class="quiet-button">같은 설정으로 다시 만들기</button><a id="metadata-link" target="_blank" rel="noopener">생성 정보 ↗</a></div><details><summary>가사 보기</summary><pre id="selected-lyrics"></pre></details><p id="selected-error" class="error" hidden></p></section>
+</section>
+</div>
+</main>
+<footer class="player" aria-label="음악 플레이어"><div class="player-song"><div class="record-small" aria-hidden="true">♪</div><div><strong id="player-title">당신의 다음 곡을 기다려요</strong><span id="player-subtitle">라이브러리에서 곡을 선택하세요</span></div></div><audio id="audio" controls preload="metadata" aria-label="선택한 곡 재생"></audio><a id="download" class="download disabled" aria-disabled="true">WAV 다운로드 ↓</a></footer>
+<div id="toast" role="status" hidden></div>
+</body></html>

@@ -1,0 +1,9 @@
+{
+  "executable": "runtime/audio.cpp-v0.8.1/audiocpp_cli.exe",
+  "model_dir": "models/yue2",
+  "model": "yue2-3b-q4_0.gguf",
+  "vae": "yue2-vae-f16.gguf",
+  "backend": "cuda",
+  "engine_version": "v0.8.1",
+  "model_revision": "f7cb0712b9c2e5e9dcadc8b3ab23a591756c131b"
+}

@@ -1,0 +1,56 @@
+{
+  "engine_version": "v0.8.1",
+  "model_revision": "f7cb0712b9c2e5e9dcadc8b3ab23a591756c131b",
+  "files": [
+    {
+      "sha256": "28bbe8ac62a06c5d9d42ba3066b051f433dc9a8f456c544e03e87202f0fa8c52",
+      "extract": "runtime/audio.cpp-v0.8.1",
+      "size": 442303082,
+      "path": ".downloads/audio-v0.8.1-bin-windows-x64-cuda12.4.zip",
+      "url": "https://github.com/0xShug0/audio.cpp/releases/download/v0.8.1/audio-v0.8.1-bin-windows-x64-cuda12.4.zip"
+    },
+    {
+      "sha256": "025faacfdc3dec215ee07cb9be7d1ef2016402723f3721a30500ceee02cc4701",
+      "extract": "runtime/audio.cpp-v0.8.1",
+      "size": 607273675,
+      "path": ".downloads/audio-v0.8.1-cudart-windows-x64-cuda12.4.zip",
+      "url": "https://github.com/0xShug0/audio.cpp/releases/download/v0.8.1/audio-v0.8.1-cudart-windows-x64-cuda12.4.zip"
+    },
+    {
+      "git_blob_sha1": "f8214009f5bb5425319e4519b12e4853ad72acf3",
+      "size": 466,
+      "path": "models/yue2/sidecars/yue2-generation-config.json",
+      "url": "https://huggingface.co/audio-cpp/Yue2-3B-GGUF/resolve/f7cb0712b9c2e5e9dcadc8b3ab23a591756c131b/sidecars/yue2-generation-config.json"
+    },
+    {
+      "git_blob_sha1": "9584e50ba9d6e487690544e14dd7555edbe27973",
+      "size": 959,
+      "path": "models/yue2/sidecars/yue2-model-config.json",
+      "url": "https://huggingface.co/audio-cpp/Yue2-3B-GGUF/resolve/f7cb0712b9c2e5e9dcadc8b3ab23a591756c131b/sidecars/yue2-model-config.json"
+    },
+    {
+      "git_blob_sha1": "9b9b0e0416d84d7c88333eb261c77e5fe2d7f7be",
+      "size": 2561218,
+      "path": "models/yue2/sidecars/yue2-qwen.tiktoken",
+      "url": "https://huggingface.co/audio-cpp/Yue2-3B-GGUF/resolve/f7cb0712b9c2e5e9dcadc8b3ab23a591756c131b/sidecars/yue2-qwen.tiktoken"
+    },
+    {
+      "git_blob_sha1": "f68832bef1b99f53dd70460f6b0d336971a664b8",
+      "size": 1378,
+      "path": "models/yue2/sidecars/yue2-vae-config.json",
+      "url": "https://huggingface.co/audio-cpp/Yue2-3B-GGUF/resolve/f7cb0712b9c2e5e9dcadc8b3ab23a591756c131b/sidecars/yue2-vae-config.json"
+    },
+    {
+      "sha256": "97af67d7f800b362faee6e6bec806bddfcccb93f25fd3f9a1012724d95af6f4a",
+      "size": 2665632320,
+      "path": "models/yue2/yue2-3b-q4_0.gguf",
+      "url": "https://huggingface.co/audio-cpp/Yue2-3B-GGUF/resolve/f7cb0712b9c2e5e9dcadc8b3ab23a591756c131b/yue2-3b-q4_0.gguf"
+    },
+    {
+      "sha256": "d4f4a05d8f291ae820cd1e43609da3fa91b56465810091a2b08c3350b751719d",
+      "size": 265218656,
+      "path": "models/yue2/yue2-vae-f16.gguf",
+      "url": "https://huggingface.co/audio-cpp/Yue2-3B-GGUF/resolve/f7cb0712b9c2e5e9dcadc8b3ab23a591756c131b/yue2-vae-f16.gguf"
+    }
+  ]
+}
