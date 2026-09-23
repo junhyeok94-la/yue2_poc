@@ -13,6 +13,8 @@ import time
 import uuid
 import wave
 
+from . import metadata
+
 ROOT = Path(__file__).resolve().parents[2]
 SIDECARS = ["yue2-model-config.json", "yue2-generation-config.json",
             "yue2-qwen.tiktoken", "yue2-vae-config.json"]
@@ -40,6 +42,7 @@ def sha256(path):
 
 
 def validate_input(data):
+    metadata.validate_snapshot(data)
     for field in ("title", "style", "lyrics"):
         if not isinstance(data.get(field), str) or not data[field].strip() or "\0" in data[field]:
             raise ValueError(f"{field}: non-empty text without NUL required")
@@ -144,7 +147,7 @@ def generate(config, data, output_root, parent_id=None, runner=None, on_started=
         folder = output_root / now.strftime("%Y-%m-%d") / run_id
         folder.mkdir(parents=True)
         command = build_command(config, data, folder / "audio.wav")
-        meta = {"schema_version": 1, "id": run_id, "parent_id": parent_id, "status": "running",
+        meta = {"schema_version": 2 if "song" in data else 1, "id": run_id, "parent_id": parent_id, "status": "running",
                 "created_at": now.isoformat(), "input": data, "config": config, "command": command,
                 "audio_path": None, "quality_review": "pending human listening"}
         save_json(folder / "metadata.json", meta)
@@ -231,7 +234,7 @@ def main(argv=None):
     try:
         if args.action == "replay":
             previous = read_json(args.metadata)
-            config, data = previous["config"], previous["input"]
+            config, data = previous["config"], metadata.read_input(previous)
             parent_id = previous["id"]
         else:
             config = read_json(resolve(args.config))

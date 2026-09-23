@@ -10,7 +10,10 @@ import time
 from urllib.parse import urlsplit, parse_qs
 import uuid
 
-from . import cli
+from . import cli, metadata
+from .lyrics.guides import workshop
+from .lyrics.importer import import_lyrics
+from .domain.section import text
 
 UI = cli.ROOT / "ui"
 RUN_ID = re.compile(r"\d{4}-\d{2}-\d{2}/\d{6}-[a-f0-9]{8}\Z")
@@ -39,8 +42,9 @@ class Studio:
 
     def track(self, folder):
         meta = cli.read_json(folder / "metadata.json")
+        metadata.read_input(meta)
         run_id = folder.relative_to(self.output_root).as_posix()
-        return {"id": run_id, "title": meta["input"]["title"], "input": meta["input"],
+        return {"schema_version": meta.get("schema_version", 1), "id": run_id, "title": meta["input"]["title"], "input": meta["input"],
                 "status": meta["status"], "created_at": meta["created_at"],
                 "elapsed_seconds": meta.get("elapsed_seconds"), "wav": meta.get("wav"),
                 "gpu": meta.get("gpu"), "error": meta.get("error"),
@@ -59,12 +63,17 @@ class Studio:
     def start(self, payload, replay_id=None):
         if replay_id:
             previous = cli.read_json(self.folder(replay_id) / "metadata.json")
-            data, config, parent = previous["input"], previous["config"], previous["id"]
+            data, config, parent = metadata.read_input(previous), previous["config"], previous["id"]
         else:
             if not isinstance(payload, dict):
                 raise ValueError("입력 형식이 올바르지 않습니다.")
             data = {k: payload.get(k, v) for k, v in DEFAULTS.items()}
-            data.update({k: payload.get(k) for k in ("title", "style", "lyrics")})
+            if "song" in payload:
+                if any(k in payload for k in ("title", "style", "lyrics", "compiled_lyrics")):
+                    raise ValueError("Song과 평면 입력을 동시에 보낼 수 없습니다.")
+                data.update(metadata.generation_input(payload["song"]))
+            else:
+                data.update({k: payload.get(k) for k in ("title", "style", "lyrics")})
             config, parent = self.config, None
         cli.validate_input(data)
         if len(data["title"]) > 160:
@@ -150,7 +159,9 @@ def make_handler(studio):
                 return
             url = urlsplit(self.path)
             try:
-                if url.path == "/api/state":
+                if url.path == "/api/workshop":
+                    self.respond(workshop())
+                elif url.path == "/api/state":
                     try:
                         cli.preflight(studio.config)
                         ready, issue = True, None
@@ -169,6 +180,7 @@ def make_handler(studio):
                         self.audio(folder / "audio.wav", "download" in query)
                 else:
                     files = {"/": ("index.html", "text/html; charset=utf-8"),
+                             "/song-editor.js": ("song-editor.js", "text/javascript; charset=utf-8"),
                              "/app.js": ("app.js", "text/javascript; charset=utf-8"),
                              "/style.css": ("style.css", "text/css; charset=utf-8"),
                              "/font.ttf": ("font.ttf", "font/ttf"),
@@ -183,7 +195,7 @@ def make_handler(studio):
             except FileNotFoundError as e:
                 self.respond({"error": str(e)}, 404)
             except (ValueError, KeyError) as e:
-                self.respond({"error": str(e)}, 400)
+                self.respond({"error": str(e), "field": getattr(e, "field", None), "section_id": getattr(e, "section_id", None)}, 400)
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 pass
 
@@ -222,23 +234,51 @@ def make_handler(studio):
                     self.wfile.write(chunk)
                     remaining -= len(chunk)
 
+        def discard_body(self):
+            # Bounded discard makes rejection responses reliable on Windows,
+            # where closing with unread request bytes may reset the connection.
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                self.connection.settimeout(2)
+                remaining = min(max(length, 0), 1048576)
+                while remaining:
+                    chunk = self.rfile.read(min(remaining, 65536))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+            except (ValueError, OSError):
+                pass
+
         def do_POST(self):
             origin = self.headers.get("Origin")
             allowed = {f"http://127.0.0.1:{self.server.server_port}", f"http://localhost:{self.server.server_port}"}
             if not self.trusted_host() or (origin and origin not in allowed) or self.headers.get("X-Studio-Request") != "1":
+                self.discard_body()
                 self.respond({"error": "허용되지 않은 요청입니다."}, 403)
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= 65536:
-                    self.respond({"error": "입력 크기는 64KB 이하여야 합니다."}, 413)
+                limit = 131072 if self.path in ("/api/song/preview", "/api/song/import", "/api/jobs") else 65536
+                if not 0 < length <= limit:
+                    self.discard_body()
+                    self.respond({"error": "입력 크기가 허용 범위를 초과했습니다."}, 413)
                     return
                 if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
                     raise ValueError("JSON 입력이 필요합니다.")
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
                     raise ValueError("잘못된 입력입니다.")
+                if self.path == "/api/song/preview":
+                    self.respond(metadata.preview(data.get("song")))
+                    return
+                if self.path == "/api/song/import":
+                    lyrics = text(data.get("lyrics"), "lyrics", 12000)
+                    self.respond({"sections": import_lyrics(lyrics)})
+                    return
                 if self.path == "/api/jobs":
+                    if "song" not in data and length > 65536:
+                        self.respond({"error": "기존 입력은 64KB 이하여야 합니다."}, 413)
+                        return
                     job = studio.start(data)
                 elif self.path == "/api/replay":
                     if not data.get("id"):
@@ -251,7 +291,7 @@ def make_handler(studio):
             except BusyError as e:
                 self.respond({"error": str(e)}, 409)
             except (ValueError, KeyError, OSError) as e:
-                self.respond({"error": str(e)}, 400)
+                self.respond({"error": str(e), "field": getattr(e, "field", None), "section_id": getattr(e, "section_id", None)}, 400)
 
         def log_message(self, fmt, *args):
             if self.command == "POST":
