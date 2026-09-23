@@ -3,6 +3,7 @@ const $ = id => document.getElementById(id);
 let tracks = [], selectedId = null, filter = 'all', busy = false, ready = false;
 let renderedKey = '', completedJob = null, sending = false, polling = false, connectionError = false, toastTimer;
 let extraThreads = 4;
+let managing=false, renameId=null, managementRevision=0;
 const editor = new SongEditor(()=>{count();saveDraft();},api);
 const labels = {succeeded:'완성',running:'생성 중',failed:'실패',timed_out:'시간 초과',cancelled:'중단'};
 const presetStyles = {
@@ -21,20 +22,24 @@ function flatInputs(){return {title:$('title').value.trim(),style:$('style').val
 function inputs(){const data=flatInputs();if(editor.mode==='sections'){delete data.title;delete data.style;delete data.lyrics;data.song=editor.song();}return data;}
 function saveDraft(){try{localStorage.setItem('music-studio-draft-v3',JSON.stringify({...flatInputs(),editor:editor.draft()}));}catch{notify('초안을 저장하지 못했습니다. 브라우저 저장 공간을 확인해 주세요.');}}
 function fill(data){for(const k of ['title','style','lyrics','seed','steps','timeout','cot'])if(data[k]!==undefined)$(k).value=data[k];extraThreads=data.threads||4;editor.load(data);count();}
-function updateActions(){ $('generate').disabled=sending||busy||!ready;$('generate').replaceChildren(document.createTextNode(sending?'요청을 보내는 중…':busy?'음악을 만들고 있어요…':'음악 만들기 ↗'));$('replay').disabled=sending||busy||!ready; }
+function updateActions(){ $('generate').disabled=sending||busy||!ready;$('generate').replaceChildren(document.createTextNode(sending?'요청을 보내는 중…':busy?'음악을 만들고 있어요…':'음악 만들기 ↗'));const track=tracks.find(t=>t.id===selectedId);
+  $('replay').disabled=sending||busy||!ready||!!track?.deleted;
+  $('reuse').disabled=!!track?.deleted;
+  for(const id of ['rename-track','delete-track','restore-track'])$(id).disabled=managing||busy||!track;
+  $('delete-track').hidden=!!track?.deleted;$('restore-track').hidden=!track?.deleted; }
 async function api(path,data){const response=await fetch(path,data?{method:'POST',headers:{'Content-Type':'application/json','X-Studio-Request':'1'},body:JSON.stringify(data)}:{});const result=await response.json();if(!response.ok)throw new Error(result.error||'요청에 실패했습니다.');return result;}
 function element(tag,className,text){const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;}
 function renderTracks(force=false){
   const query=$('search').value.toLocaleLowerCase();
-  const key=JSON.stringify([tracks.map(t=>[t.id,t.status,t.has_audio]),selectedId,filter,query]);
+  const key=JSON.stringify([tracks.map(t=>[t.id,t.title,t.status,t.has_audio,t.deleted]),selectedId,filter,query]);
   if(!force&&key===renderedKey)return;renderedKey=key;
-  const list=tracks.filter(t=>(filter==='all'||(filter==='failed'?!['succeeded','running'].includes(t.status):t.status===filter))&&`${t.title} ${t.input.style}`.toLocaleLowerCase().includes(query));
-  $('tracks').replaceChildren();$('track-count').textContent=tracks.filter(t=>t.has_audio).length;
+  const list=tracks.filter(t=>(filter==='trash'?t.deleted:!t.deleted&&(filter==='all'||(filter==='failed'?!['succeeded','running'].includes(t.status):t.status===filter)))&&`${t.title} ${t.input.style}`.toLocaleLowerCase().includes(query));
+  $('tracks').replaceChildren();$('track-count').textContent=tracks.filter(t=>!t.deleted&&t.has_audio).length;
   if(!list.length){$('tracks').append(element('p','empty',tracks.length?'조건에 맞는 곡이 없어요. 다른 검색어나 필터를 선택해 주세요.':'아직 만든 음악이 없어요. 왼쪽에서 첫 곡을 만들어 보세요.'));return;}
   for(const track of list){
     const button=element('button',`track${track.id===selectedId?' selected':''}`);button.type='button';button.setAttribute('aria-label',`${track.title} 선택`);button.setAttribute('aria-pressed',String(track.id===selectedId));
     const art=element('span','track-art',track.has_audio?'▶':'♪');art.setAttribute('aria-hidden','true');button.append(art);
-    const copy=element('span','track-copy');copy.append(element('strong','',track.title),element('span','style-preview',track.input.style),element('span','track-date',`${new Date(track.created_at).toLocaleDateString('ko-KR')} · ${labels[track.status]||track.status}`));button.append(copy,element('span','track-time',track.wav?clock(track.wav.duration_seconds):'—'));
+    const copy=element('span','track-copy');copy.append(element('strong','',track.title),element('span','style-preview',track.input.style),element('span','track-date',`${new Date(track.created_at).toLocaleDateString('ko-KR')} · ${track.deleted?'휴지통':labels[track.status]||track.status}`));button.append(copy,element('span','track-time',track.wav?clock(track.wav.duration_seconds):'—'));
     button.addEventListener('click',()=>select(track.id,true));$('tracks').append(button);
   }
 }
@@ -69,9 +74,9 @@ function renderJob(job){
   if(job.status!=='running'&&completedJob!==job.id){completedJob=job.id;if(job.status==='succeeded'&&job.run_id){select(job.run_id);notify('새로운 음악이 완성됐어요.');}}
 }
 async function refresh(){
-  if(polling)return;polling=true;
-  try{const state=await api('/api/state');if(connectionError){error('');connectionError=false;}tracks=state.tracks;ready=state.ready;busy=state.job?.status==='running'||state.busy;$('connection').textContent=ready?(busy?'음악 생성 중':'로컬 스튜디오 연결됨'):'환경 확인 필요';
-    if(state.issue)error(state.issue);renderTracks();renderJob(state.job);if(!selectedId&&tracks.some(t=>t.has_audio))select(tracks.find(t=>t.has_audio).id);updateActions();
+  if(polling)return;polling=true;const revision=managementRevision;
+  try{const state=await api('/api/state');if(revision!==managementRevision)return;if(connectionError){error('');connectionError=false;}tracks=[...state.tracks,...(state.trash||[])];ready=state.ready;busy=state.job?.status==='running'||state.busy;$('connection').textContent=ready?(busy?'음악 생성 중':'로컬 스튜디오 연결됨'):'환경 확인 필요';
+    if(state.issue)error(state.issue);const current=tracks.find(t=>t.id===selectedId);if(selectedId&&(!current||(current.deleted&&filter!=='trash')))clearSelection();if(current&&$('selected-title').textContent!==current.title)select(current.id);renderTracks();renderJob(state.job);if(filter!=='trash'&&!selectedId&&tracks.some(t=>t.has_audio))select(tracks.find(t=>t.has_audio).id);updateActions();
   }catch(e){connectionError=true;ready=false;updateActions();$('connection').textContent='서버 연결 끊김';error('스튜디오 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인해 주세요.');}
   finally{polling=false;}
 }
@@ -91,5 +96,39 @@ $('example').addEventListener('click',()=>{if($('lyrics').value.trim()&&$('lyric
 document.querySelectorAll('[data-filter]').forEach(button=>button.addEventListener('click',()=>{filter=button.dataset.filter;document.querySelectorAll('[data-filter]').forEach(b=>{b.classList.toggle('active',b===button);b.setAttribute('aria-pressed',String(b===button));});renderTracks();}));
 $('search').addEventListener('input',()=>renderTracks());$('refresh').addEventListener('click',()=>refresh());
 $('audio').addEventListener('error',()=>{if($('audio').getAttribute('src'))notify('음원을 불러오지 못했습니다. 서버 연결을 확인해 주세요.');});
+
+function clearSelection(){
+  selectedId=null;$('selected').hidden=true;
+  $('audio').pause();$('audio').removeAttribute('src');$('audio').load();
+  $('player-title').textContent='라이브러리에서 곡을 선택하세요';$('player-subtitle').textContent='';
+  $('download').removeAttribute('href');$('download').classList.add('disabled');$('download').setAttribute('aria-disabled','true');
+}
+async function manageTrack(action,id,title){
+  if(managing||busy)return false;
+  managing=true;updateActions();$('save-track-name').disabled=true;
+  try{
+    const track=await api('/api/tracks/'+action,{id,title});managementRevision++;
+    tracks=tracks.map(t=>t.id===id?track:t);
+    if(action==='delete'||action==='restore'){if(selectedId===id)clearSelection();}
+    else if(selectedId===id)select(id);
+    renderTracks(true);
+    notify(action==='rename'?'곡 이름을 변경했습니다.':action==='delete'?'휴지통으로 이동했습니다. 휴지통에서 복원할 수 있어요.':'라이브러리에 복원했습니다.');
+    return true;
+  }catch(e){if(action==='rename')$('manage-error').textContent=e.message;else notify(e.message);return false;}
+  finally{managing=false;$('save-track-name').disabled=false;updateActions();}
+}
+$('rename-track').onclick=()=>{
+  const track=tracks.find(t=>t.id===selectedId);if(!track)return;
+  renameId=track.id;$('track-name').value=track.title;$('manage-error').textContent='';
+  $('rename-dialog').showModal();$('track-name').focus();
+};
+$('cancel-rename').onclick=()=>$('rename-dialog').close();
+$('rename-form').onsubmit=async event=>{event.preventDefault();if(await manageTrack('rename',renameId,$('track-name').value.trim()))$('rename-dialog').close();};
+$('delete-track').onclick=()=>{
+  const track=tracks.find(t=>t.id===selectedId);
+  if(track&&confirm('“'+track.title+'”을 휴지통으로 이동할까요? 음원과 생성 기록은 보관되며 복원할 수 있습니다.'))manageTrack('delete',track.id);
+};
+$('restore-track').onclick=()=>{if(selectedId)manageTrack('restore',selectedId);};
+
 try{const draft=JSON.parse(localStorage.getItem('music-studio-draft-v3')||localStorage.getItem('music-studio-draft'));if(draft&&typeof draft==='object')fill(draft);}catch{/* ignore invalid draft */}
 editor.init();count();refresh();setInterval(refresh,2000);

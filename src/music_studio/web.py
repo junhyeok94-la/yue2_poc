@@ -47,24 +47,54 @@ class Studio:
         meta = cli.read_json(folder / "metadata.json")
         metadata.read_input(meta)
         run_id = folder.relative_to(self.output_root).as_posix()
-        return {"schema_version": meta.get("schema_version", 1), "id": run_id, "title": meta["input"]["title"], "input": meta["input"],
+        details = self.library_details(folder)
+        return {"schema_version": meta.get("schema_version", 1), "id": run_id, "title": details.get("title", meta["input"]["title"]), "deleted": details.get("deleted", False), "input": meta["input"],
                 "status": meta["status"], "created_at": meta["created_at"],
                 "elapsed_seconds": meta.get("elapsed_seconds"), "wav": meta.get("wav"),
                 "gpu": meta.get("gpu"), "error": meta.get("error"),
-                "has_audio": meta["status"] == "succeeded" and (folder / "audio.wav").is_file()}
+                "has_audio": not details.get("deleted", False) and meta["status"] == "succeeded" and (folder / "audio.wav").is_file()}
 
-    def library(self):
+    def library_details(self, folder):
+        path = folder / "library.json"
+        return cli.read_json(path) if path.is_file() else {}
+
+    def manage_track(self, action, run_id, title=None):
+        with self.lock:
+            folder = self.folder(run_id)
+            meta = cli.read_json(folder / "metadata.json")
+            if meta["status"] == "running" or (self.job and self.job["status"] == "running") or (self.output_root / ".generation.lock").exists():
+                raise BusyError("생성이 끝난 뒤 곡을 관리해 주세요.")
+            details = self.library_details(folder)
+            if action == "rename":
+                title = text(title, "title", 160).strip()
+                if not title or any(ord(c) < 32 for c in title):
+                    raise ValueError("곡 이름은 줄바꿈 없이 1~160자로 입력하세요.")
+                details["title"] = title
+            elif action in ("delete", "restore"):
+                details["deleted"] = action == "delete"
+            else:
+                raise ValueError("지원하지 않는 곡 관리 요청입니다.")
+            cli.save_json(folder / "library.json", details)
+            if action == "delete" and self.job and self.job.get("run_id") == run_id:
+                self.job = None
+            return self.track(folder)
+
+    def library(self, deleted=False):
         tracks = []
         for path in sorted(self.output_root.glob("*/*/metadata.json"), reverse=True):
             try:
                 if RUN_ID.fullmatch(path.parent.relative_to(self.output_root).as_posix()):
-                    tracks.append(self.track(path.parent))
+                    track = self.track(path.parent)
+                    if track["deleted"] == deleted:
+                        tracks.append(track)
             except (OSError, ValueError, KeyError):
                 continue
         return tracks
 
     def start(self, payload, replay_id=None):
         if replay_id:
+            if self.library_details(self.folder(replay_id)).get("deleted", False):
+                raise ValueError("휴지통에서 복원한 뒤 다시 생성하세요.")
             previous = cli.read_json(self.folder(replay_id) / "metadata.json")
             data, config, parent = metadata.read_input(previous), previous["config"], previous["id"]
         else:
@@ -83,6 +113,8 @@ class Studio:
             raise ValueError("곡 제목은 160자 이하로 입력하세요.")
         cli.preflight(config)
         with self.lock:
+            if replay_id and self.library_details(self.folder(replay_id)).get("deleted", False):
+                raise ValueError("휴지통에서 복원한 뒤 다시 생성하세요.")
             if (self.job and self.job["status"] == "running") or (self.output_root / ".generation.lock").exists():
                 raise BusyError("다른 음악을 만들고 있습니다. 완료 후 다시 시도하세요.")
             self.job = {"id": uuid.uuid4().hex, "status": "running", "title": data["title"],
@@ -172,7 +204,7 @@ def make_handler(studio):
                         ready, issue = True, None
                     except (ValueError, OSError, KeyError) as e:
                         ready, issue = False, str(e)
-                    self.respond({"tracks": studio.library(), "job": studio.status(), "ready": ready,
+                    self.respond({"tracks": studio.library(), "trash": studio.library(deleted=True), "job": studio.status(), "ready": ready,
                                   "issue": issue, "busy": (studio.output_root / ".generation.lock").exists()})
                 elif url.path in ("/api/audio", "/api/metadata"):
                     query = parse_qs(url.query)
@@ -273,6 +305,9 @@ def make_handler(studio):
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
                     raise ValueError("잘못된 입력입니다.")
+                if self.path in ("/api/tracks/rename", "/api/tracks/delete", "/api/tracks/restore"):
+                    self.respond(studio.manage_track(self.path.rsplit("/", 1)[1], data.get("id"), data.get("title")))
+                    return
                 if self.path == "/api/advisor":
                     self.respond(studio.advisor.request(data.get("action"), data.get("section"), data.get("context", {})))
                     return

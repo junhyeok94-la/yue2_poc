@@ -5,11 +5,19 @@ const path=require('node:path');
 const {JSDOM}=require(require.resolve('jsdom',{paths:[process.env.MUSIC_STUDIO_TEST_DEPS||path.join(__dirname,'../outputs/ui-test')]}));
 const base='http://127.0.0.1:7860';
 async function until(fn){for(let i=0;i<100;i++){if(fn())return;await new Promise(r=>setTimeout(r,20));}throw new Error('UI condition timed out');}
-async function setup(draft,advisor){
+async function setup(draft,advisor,library){
  const dom=new JSDOM(fs.readFileSync(path.join(__dirname,'../ui/index.html'),'utf8'),{url:base,runScripts:'outside-only'});
- const w=dom.window;const jobs=[];w.confirm=()=>true;w.HTMLElement.prototype.scrollIntoView=()=>{};
+ const w=dom.window;const jobs=[];w.HTMLMediaElement.prototype.pause=function(){};w.HTMLMediaElement.prototype.load=function(){};w.HTMLMediaElement.prototype.play=()=>Promise.resolve();w.confirm=()=>true;w.HTMLElement.prototype.scrollIntoView=()=>{};
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;};
- w.fetch=async(p,options)=>{if(advisor&&p==='/api/advisor'){return {ok:true,json:async()=>options?.body?advisor(JSON.parse(options.body)):{configured:true,model:'test'}};}if(p==='/api/jobs'){jobs.push(JSON.parse(options.body));return {ok:true,json:async()=>({id:'test'})};}const response=await fetch(new URL(p,base),options);if(p==='/api/state'){const state=await response.json();return {ok:true,json:async()=>({...state,job:null,busy:false})};}return response;};
+ w.fetch=async(p,options)=>{
+ if(library&&p==='/api/state')return {ok:true,json:async()=>({tracks:library.filter(t=>!t.deleted),trash:library.filter(t=>t.deleted),ready:true,busy:false,job:null})};
+ if(library&&p.startsWith('/api/tracks/')){
+   const data=JSON.parse(options.body),track=library.find(t=>t.id===data.id);
+   if(p.endsWith('/rename'))track.title=data.title;
+   else{track.deleted=p.endsWith('/delete');track.has_audio=!track.deleted;}
+   return {ok:true,json:async()=>JSON.parse(JSON.stringify(track))};
+ }
+if(advisor&&p==='/api/advisor'){return {ok:true,json:async()=>options?.body?advisor(JSON.parse(options.body)):{configured:true,model:'test'}};}if(p==='/api/jobs'){jobs.push(JSON.parse(options.body));return {ok:true,json:async()=>({id:'test'})};}const response=await fetch(new URL(p,base),options);if(p==='/api/state'){const state=await response.json();return {ok:true,json:async()=>({...state,job:null,busy:false})};}return response;};
  if(draft)w.localStorage.setItem('music-studio-draft',JSON.stringify(draft));
  w.eval(fs.readFileSync(path.join(__dirname,'../ui/song-editor.js'),'utf8'));
  w.eval(fs.readFileSync(path.join(__dirname,'../ui/app.js'),'utf8'));
@@ -166,3 +174,40 @@ for(const action of ['review','rhyme','hook']){
    }finally{dom.window.close();}
  });
 }
+
+test('library rename, cancelled delete, trash and restore update player and search',async()=>{
+ const library=[{id:'2026-09-24/010101-abcdef12',title:'원래 제목',input:{title:'원래 제목',style:'R&B',lyrics:'가사',seed:1},
+   status:'succeeded',created_at:'2026-09-24T00:00:00+09:00',has_audio:true,deleted:false,wav:{duration_seconds:30}}];
+ const {dom,w,d}=await setup(undefined,undefined,library);
+ try{
+   await until(()=>d.getElementById('selected-title').textContent==='원래 제목');
+   const source=d.getElementById('audio').getAttribute('src');
+   d.getElementById('rename-track').click();
+   input(w,d.getElementById('track-name'),'바꾼 이름');
+   d.getElementById('rename-form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+   await until(()=>d.getElementById('selected-title').textContent==='바꾼 이름');
+   assert.equal(d.getElementById('player-title').textContent,'바꾼 이름');
+   assert.equal(d.getElementById('audio').getAttribute('src'),source);
+   assert.equal(library[0].input.title,'원래 제목');
+   input(w,d.getElementById('search'),'바꾼 이름');
+   assert.equal(d.querySelectorAll('#tracks .track').length,1);
+   w.confirm=()=>false;d.getElementById('delete-track').click();assert.equal(library[0].deleted,false);
+   w.confirm=()=>true;d.getElementById('delete-track').click();
+   await until(()=>d.getElementById('selected').hidden);
+   assert.equal(d.getElementById('audio').getAttribute('src'),null);
+   assert.equal(d.getElementById('download').getAttribute('href'),null);
+   assert.equal(d.querySelectorAll('#tracks .track').length,0);
+   d.querySelector('[data-filter="trash"]').click();
+   assert.equal(d.querySelectorAll('#tracks .track').length,1);
+   d.querySelector('#tracks .track').click();
+   assert.equal(d.getElementById('replay').disabled,true);
+   assert.equal(d.getElementById('restore-track').hidden,false);
+   d.getElementById('restore-track').click();
+   await until(()=>!library[0].deleted);
+   d.querySelector('[data-filter="all"]').click();
+   await until(()=>d.querySelector('#tracks .track'));
+   d.querySelector('#tracks .track').click();
+   assert.equal(d.getElementById('selected-title').textContent,'바꾼 이름');
+   assert.equal(d.getElementById('replay').disabled,false);
+ }finally{dom.window.close();}
+});
