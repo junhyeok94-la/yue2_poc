@@ -61,6 +61,32 @@ class AdvisorTests(unittest.TestCase):
             self.assertEqual(caught.exception.status,409)
         finally:advisor.lock.release()
 
+    def test_focused_prompts_schema_and_response_types(self):
+        for action, phrase in [('rhyme','sound echoes'),('hook','memorable lyrical hook')]:
+            captured=[]
+            def transport(body):
+                captured.append(body)
+                return response([suggestion(type=action)])
+            advisor=GeminiAdvisor('key',transport=transport)
+            result=advisor.request(action,SECTION,CONTEXT)
+            self.assertEqual(result['action'],action)
+            self.assertEqual(result['suggestions'][0]['type'],action)
+            body=captured[0]
+            self.assertIn(phrase,body['systemInstruction']['parts'][0]['text'])
+            self.assertEqual(body['generationConfig']['responseJsonSchema']['properties']['suggestions']['items']['properties']['type']['enum'],[action])
+            self.assertEqual(json.loads(body['contents'][0]['parts'][0]['text'])['action'],action)
+
+    def test_focus_rejects_other_types_bad_source_and_blank_lyrics(self):
+        for action in ('rhyme','hook'):
+            for item in [suggestion(),suggestion(type=action,original='not the source'),suggestion(type=action,line_index=1)]:
+                advisor=GeminiAdvisor('key',transport=lambda body:response([item]))
+                with self.assertRaises(AdvisorError):advisor.request(action,SECTION,CONTEXT)
+            with self.assertRaises(AdvisorError) as caught:
+                GeminiAdvisor('key').request(action,SECTION|{'lyrics':[]},CONTEXT)
+            self.assertEqual(caught.exception.status,400)
+            advisor=GeminiAdvisor('key',transport=lambda body:response([]))
+            self.assertEqual(advisor.request(action,SECTION,CONTEXT)['suggestions'],[])
+
     def test_provider_errors_redacted(self):
         for code in [400,401,403,404,429,500]:
             err=urllib.error.HTTPError('https://example.invalid/SECRET',code,'SECRET',{},None)
@@ -92,3 +118,13 @@ class AdvisorApiTests(unittest.TestCase):
         self.assertEqual(code,200)
         self.assertNotIn(b'SECRET',body)
         self.assertIsNone(self.studio.job)
+
+    def test_focused_actions_api_preserve_original_and_do_not_generate(self):
+        for action in ('rhyme','hook'):
+            self.studio.advisor=GeminiAdvisor('key',transport=lambda body:response([suggestion(type=action)]))
+            payload={'action':action,'section':SECTION,'context':CONTEXT}
+            code,_,body=self.request('POST','/api/advisor',payload)
+            self.assertEqual(code,200)
+            self.assertEqual(json.loads(body)['suggestions'][0]['type'],action)
+            self.assertEqual(SECTION['lyrics'],['조용한 밤'])
+            self.assertIsNone(self.studio.job)

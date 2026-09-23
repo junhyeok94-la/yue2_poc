@@ -63,12 +63,12 @@ class GeminiAdvisor:
         raise AdvisorError('이번 버전은 Section별 요청만 지원합니다.',400)
 
     def request(self, action, section, context):
-        if action not in ('review','suggest'):
+        if action not in ('review','suggest','rhyme','hook'):
             raise AdvisorError('지원하지 않는 요청입니다.',400)
         section=validate_section(section)
         if len('\n'.join(section['lyrics']))>4000 or len(section['lyrics'])>100:
             raise AdvisorError('AI 요청은 Section당 4,000자·100행 이하로 작성하세요.',400)
-        if action=='review' and not any(line.strip() for line in section['lyrics']):
+        if action!='suggest' and not any(line.strip() for line in section['lyrics']):
             raise AdvisorError('검토할 가사를 먼저 입력하세요.',400)
         if not isinstance(context,dict):
             raise AdvisorError('곡 문맥이 올바르지 않습니다.',400)
@@ -85,10 +85,27 @@ class GeminiAdvisor:
                 'Review expression, syllable balance, rhyme and chorus hooks where useful. Respect language, meaning and author voice. Explain reasons in Korean. '
                 'Return up to 3 concise useful suggestions; return an empty list if no change is helpful. '
                 'Do not claim exact musical syllables or bar control. No markdown. '
-                'For review: replace one existing line per suggestion, zero-based line_index, original must exactly match. '
+                'For review, rhyme and hook: replace one existing line per suggestion, zero-based line_index, original must exactly match. '
                 'For suggest: return one suggestion adding 1 or 2 lines at the end; line_index equals lyrics length, original empty. '
                 'Each suggested line at most 200 characters. Each reason at most 500 characters.')
+            if action=='rhyme':
+                instruction += (
+                    ' Focus ONLY on rhyme and sound echoes between lines in this section. '
+                    'Consider end sounds, vowel echoes and internal rhyme in the original language, not just identical spelling. '
+                    'Preserve meaning and natural phrasing; do not force rhyme by adding awkward words. '
+                    'Explain in Korean which other original line or phrase the proposal echoes and which sounds relate. '
+                    'Do not claim to have heard a melody or verified singing pronunciation. '
+                    'Each suggestion must be independently usable with the unchanged other lines, type=rhyme.')
+            elif action=='hook':
+                instruction += (
+                    ' Focus ONLY on making a memorable lyrical hook: a concise central phrase, clear emotional message, '
+                    'natural repetition or a singable phrase. Adapt to the section role; do not change its type. '
+                    'Preserve the author intent and imagery rather than adding unrelated slogans. '
+                    'Explain in Korean what phrase becomes memorable and why, without guaranteeing popularity or melody quality. '
+                    'Each suggestion must be independently usable with the unchanged other lines, type=hook.')
             schema=json.loads(json.dumps(SCHEMA))
+            if action in ('rhyme','hook'):
+                schema['properties']['suggestions']['items']['properties']['type']['enum']=[action]
             if action=='suggest':
                 schema['properties']['suggestions']['maxItems']=1
                 properties=schema['properties']['suggestions']['items']['properties']
@@ -108,7 +125,7 @@ class GeminiAdvisor:
                 raw=''.join(p.get('text','') for p in candidate['content']['parts'] if not p.get('thought'))
                 data=json.loads(raw)
                 items=data['suggestions']
-                if not isinstance(items,list) or len(items)>(3 if action=='review' else 1):
+                if not isinstance(items,list) or len(items)>(1 if action=='suggest' else 3):
                     raise ValueError('count')
                 suggestions=[]
                 for item in items:
@@ -119,13 +136,15 @@ class GeminiAdvisor:
                     lines=proposed.split('\n')
                     if not proposed.strip() or not reason.strip() or len(reason)>500 or '\r' in proposed or any(len(s)>200 for s in lines):
                         raise ValueError('length')
-                    if action=='review':
+                    if action!='suggest':
                         if not 0<=index<len(section['lyrics']) or original!=section['lyrics'][index] or len(lines)!=1 or original==proposed:
                             raise ValueError('source')
                     elif index!=len(section['lyrics']) or original!='' or not 1<=len(lines)<=2:
                         raise ValueError('append')
                     if item['type'] not in ('expression','syllable_balance','rhyme','hook','idea'):
                         raise ValueError('kind')
+                    if action in ('rhyme','hook') and item['type']!=action:
+                        raise ValueError('focus')
                     suggestions.append(asdict(Suggestion(str(uuid.uuid4()),item['type'],section['id'],index,original,proposed,reason,revision)))
                 return {'suggestions':suggestions,'source_revision':revision,'model':self.model,'action':action}
             except (ValueError,KeyError,TypeError,IndexError,AttributeError):

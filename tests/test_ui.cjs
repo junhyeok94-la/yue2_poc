@@ -101,3 +101,34 @@ test('AI suggestions require apply; ignore and stale replies preserve lyrics',as
    assert.equal(d.querySelector('#section-cards textarea').value,'응답 전에 편집');
  }finally{dom.window.close();}
 });
+
+for(const [action,label] of [['rhyme','라임'],['hook','Hook 강화']]){
+ test(action+' request shows type, applies only selected line and blocks stale results',async()=>{
+   const calls=[];
+   const advisor=async payload=>{
+     calls.push(payload);
+     return {suggestions:[{id:action+'-id',type:action,section_id:payload.section.id,line_index:0,
+       original:payload.section.lyrics[0],suggested:'기억에 남을 밤',reason:'원문의 감정을 살린 '+label+' 제안',source_revision:'test'}]};
+   };
+   const {dom,w,d}=await setup(undefined,advisor);
+   try{
+     d.getElementById('add-section').click();
+     await until(()=>!d.querySelector('.ai-request').disabled);
+     input(w,d.querySelector('#section-cards textarea'),'조용한 밤\n두 번째 행');
+     const request=()=>d.querySelector('[data-action="'+action+'"]').click();
+     request();await until(()=>d.querySelector('.suggestion'));
+     assert.equal(calls[0].action,action);
+     assert.equal(d.querySelector('.suggestion .mini-label').textContent,label);
+     assert.equal(d.querySelector('#section-cards textarea').value,'조용한 밤\n두 번째 행');
+     d.querySelector('.suggestion button:last-child').click();
+     assert.equal(d.querySelector('.suggestion'),null);
+     request();await until(()=>d.querySelector('.suggestion'));
+     d.querySelector('.suggestion button').click();
+     assert.equal(d.querySelector('#section-cards textarea').value,'기억에 남을 밤\n두 번째 행');
+     request();await until(()=>d.querySelector('.suggestion'));
+     input(w,d.querySelector('#section-cards textarea'),'직접 수정\n두 번째 행');
+     assert.equal(d.querySelector('.suggestion button').disabled,true);
+     assert.equal(d.querySelector('#section-cards textarea').value,'직접 수정\n두 번째 행');
+   }finally{dom.window.close();}
+ });
+}

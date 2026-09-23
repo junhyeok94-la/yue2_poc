@@ -89,10 +89,11 @@ class SongEditor {
       const assistant=node('section',undefined,'ai-assistant');assistant.append(node('h4','AI Lyrics Assistant'));
       assistant.append(node('p','요청하면 이 Section의 가사·구조와 곡 제목·스타일이 Google Gemini로 전송됩니다. 자동 적용하지 않습니다.','field-foot'));
       const aiActions=node('div',undefined,'section-actions');
-      for(const [action,title] of [['review','가사 검토'],['suggest','다음 1~2줄 제안']]){
+      for(const [action,title] of [['review','가사 검토'],['rhyme','라임 검토'],['hook','Hook 강화'],['suggest','다음 1~2줄 제안']]){
         const button=node('button',title,'quiet-button ai-request');button.type='button';button.dataset.action=action;
         button.onclick=()=>this.askAdvice(s.id,action);aiActions.append(button);
       }
+      assistant.append(node('p','라임: 행 사이의 소리 연결 · Hook: 기억에 남는 핵심 구절. 제안은 각각 원문 기준이며 직접 선택해 적용합니다.','field-foot'));
       assistant.append(aiActions,node('p','','ai-status'),node('div',undefined,'advice-list'));card.append(assistant);
       const actions=node('div',undefined,'section-actions');
       for(const [text,delta] of [['↑ 위로',-1],['↓ 아래로',1]]){const b=node('button',text,'quiet-button');b.type='button';b.disabled=index+delta<0||index+delta>=this.sections.length;b.setAttribute('aria-label',(index+1)+'번 Section '+text);
@@ -110,6 +111,8 @@ class SongEditor {
       const list=card.querySelector('.advice-list');list.replaceChildren();
       for(const item of entry?.items||[]){
         const box=node('article',undefined,'suggestion');
+        const kind={expression:'표현',syllable_balance:'음절 균형',rhyme:'라임',hook:'Hook 강화',idea:'아이디어'}[item.type]||'제안';
+        box.append(node('span',kind,'mini-label'));
         box.append(node('strong',entry.action==='suggest'?'다음 행 추가':(item.line_index+1)+'행 수정'));
         for(const [label,value] of [['원문',item.original||'(Section 끝에 추가)'],['제안',item.suggested],['이유',item.reason]])box.append(node('h5',label),node('p',value));
         const stale=entry.revision!==this.revision;
@@ -134,7 +137,7 @@ class SongEditor {
   applyAdvice(id,item,entry){
     const section=this.sections.find(s=>s.id===id);
     if(!section||this.mode!=='sections'||entry.revision!==this.revision)return;
-    if(entry.action==='review'){
+    if(entry.action!=='suggest'){
       if(section.lyrics[item.line_index]!==item.original)return;
       section.lyrics[item.line_index]=item.suggested;
     }else{
