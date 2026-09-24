@@ -10,7 +10,7 @@ import time
 from urllib.parse import urlsplit, parse_qs
 import uuid
 
-from . import cli, metadata, music
+from . import cli, metadata, music, versions
 from .lyrics.guides import workshop
 from .lyrics.importer import import_lyrics
 from .domain.section import text
@@ -49,6 +49,8 @@ class Studio:
         run_id = folder.relative_to(self.output_root).as_posix()
         details = self.library_details(folder)
         return {"schema_version": meta.get("schema_version", 1), "id": run_id, "title": details.get("title", meta["input"]["title"]), "deleted": details.get("deleted", False), "input": meta["input"],
+                "_legacy_parent": meta.get("parent_id"),
+                "_version": cli.read_json(folder / "version.json") if (folder / "version.json").is_file() else {},
                 "status": meta["status"], "created_at": meta["created_at"],
                 "elapsed_seconds": meta.get("elapsed_seconds"), "wav": meta.get("wav"),
                 "gpu": meta.get("gpu"), "error": meta.get("error"),
@@ -77,7 +79,7 @@ class Studio:
             cli.save_json(folder / "library.json", details)
             if action == "delete" and self.job and self.job.get("run_id") == run_id:
                 self.job = None
-            return self.track(folder)
+            return next(t for t in self.library(deleted=None) if t["id"] == run_id)
 
     def library(self, deleted=False):
         tracks = []
@@ -85,13 +87,30 @@ class Studio:
             try:
                 if RUN_ID.fullmatch(path.parent.relative_to(self.output_root).as_posix()):
                     track = self.track(path.parent)
-                    if track["deleted"] == deleted:
-                        tracks.append(track)
+                    tracks.append(track)
             except (OSError, ValueError, KeyError):
                 continue
-        return tracks
+        versions.annotate(tracks)
+        return [t for t in tracks if deleted is None or t["deleted"] == deleted]
 
     def start(self, payload, replay_id=None):
+        version = None
+        if not isinstance(payload, dict):
+            raise ValueError("입력 형식이 올바르지 않습니다.")
+        source_id = replay_id
+        if not replay_id and "version" in payload:
+            version = payload["version"]
+            if not isinstance(version, dict) or set(version) != {"parent_id", "kind"} or version.get("kind") not in ("variation", "lyrics_revision", "remix"):
+                raise ValueError("버전의 원본과 종류를 확인하세요.")
+            source_id = version["parent_id"]
+            self.folder(source_id)
+        if source_id:
+            source_folder = self.folder(source_id)
+            source = cli.read_json(source_folder / "metadata.json")
+            metadata.read_input(source)
+            if source["status"] == "running":
+                raise BusyError("원본 생성이 끝난 뒤 버전을 만드세요.")
+            version = {"parent_id": source_id, "kind": "replay" if replay_id else version["kind"]}
         if replay_id:
             if self.library_details(self.folder(replay_id)).get("deleted", False):
                 raise ValueError("휴지통에서 복원한 뒤 다시 생성하세요.")
@@ -112,24 +131,26 @@ class Studio:
                         raise ValueError("음악 설정과 style을 동시에 보낼 수 없습니다.")
                     data["music_settings"] = music.validate_settings(payload["music_settings"])
                     data["style"] = music.compile_style(data["music_settings"])
-            config, parent = self.config, None
+            config, parent = self.config, source["id"] if source_id else None
         cli.validate_input(data)
         if len(data["title"]) > 160:
             raise ValueError("곡 제목은 160자 이하로 입력하세요.")
         cli.preflight(config)
         with self.lock:
-            if replay_id and self.library_details(self.folder(replay_id)).get("deleted", False):
+            if source_id and self.library_details(self.folder(source_id)).get("deleted", False):
                 raise ValueError("휴지통에서 복원한 뒤 다시 생성하세요.")
             if (self.job and self.job["status"] == "running") or (self.output_root / ".generation.lock").exists():
                 raise BusyError("다른 음악을 만들고 있습니다. 완료 후 다시 시도하세요.")
             self.job = {"id": uuid.uuid4().hex, "status": "running", "title": data["title"],
                         "started": time.time(), "run_id": None, "error": None}
             job = self.job
-            threading.Thread(target=self.work, args=(job, deepcopy(config), deepcopy(data), parent), daemon=False).start()
+            threading.Thread(target=self.work, args=(job, deepcopy(config), deepcopy(data), parent, deepcopy(version)), daemon=False).start()
             return dict(job)
 
-    def work(self, job, config, data, parent):
+    def work(self, job, config, data, parent, version=None):
         def started(folder):
+            if version:
+                cli.save_json(folder / "version.json", version)
             with self.lock:
                 job["run_id"] = folder.relative_to(self.output_root).as_posix()
         try:
@@ -213,6 +234,11 @@ def make_handler(studio):
                         ready, issue = False, str(e)
                     self.respond({"tracks": studio.library(), "trash": studio.library(deleted=True), "job": studio.status(), "ready": ready,
                                   "issue": issue, "busy": (studio.output_root / ".generation.lock").exists()})
+                elif url.path == "/api/versions/compare":
+                    query = parse_qs(url.query)
+                    left = cli.read_json(studio.folder(query.get("left", [""])[0]) / "metadata.json")
+                    right = cli.read_json(studio.folder(query.get("right", [""])[0]) / "metadata.json")
+                    self.respond({"changes": versions.compare(left, right)})
                 elif url.path in ("/api/audio", "/api/metadata"):
                     query = parse_qs(url.query)
                     folder = studio.folder(query.get("id", [""])[0])

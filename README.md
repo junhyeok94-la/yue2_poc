@@ -3,6 +3,12 @@
 Windows / RTX 3060 12GB에서 YuE2 GGUF를 실행하는 로컬 음악 생성 웹 스튜디오와 CLI.
 Python은 실행·이력 관리에만 사용하고 실제 추론은 audio.cpp CUDA가 수행합니다.
 
+## v0.6 Song Versions
+
+라이브러리에서 곡을 선택하고 “이 곡에서 새 버전”으로 Variation·Lyrics Revision·Remix를 만들 수 있습니다.
+같은 곡의 버전들을 묶어 보여주며 부모 관계, 가사·설정 차이, 기준/선택 버전 듣기를 지원합니다.
+[사용법·저장 방식·검증 결과](docs/09-v0.6-song-versions.md).
+
 ## v0.5 Music Guide
 
 BPM·Key·Genre·Mood·Vocal·Instruments를 선택하고 각 설정의 “왜?” 설명을 볼 수 있습니다.

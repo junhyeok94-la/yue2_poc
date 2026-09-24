@@ -11,6 +11,7 @@ async function setup(draft,advisor,library,musicAdvisor){
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;};
  w.fetch=async(p,options)=>{
  if(musicAdvisor&&p==='/api/music/advice')return {ok:true,json:async()=>musicAdvisor(JSON.parse(options.body))};
+ if(library&&p.startsWith('/api/versions/compare?'))return {ok:true,json:async()=>({changes:[{label:'가사',before:'원본 가사',after:'수정 가사'}]})};
  if(library&&p==='/api/state')return {ok:true,json:async()=>({tracks:library.filter(t=>!t.deleted),trash:library.filter(t=>t.deleted),ready:true,busy:false,job:null})};
  if(library&&p.startsWith('/api/tracks/')){
    const data=JSON.parse(options.body),track=library.find(t=>t.id===data.id);
@@ -261,5 +262,32 @@ test('music advice applies independently, ignores, and blocks late or stale resu
   delayed=true;d.getElementById('music-advise').click();await until(()=>release);
   input(w,d.getElementById('music-bpm'),'100');release();await until(()=>d.querySelectorAll('.music-suggestion').length===3);
   assert.equal(d.querySelector('.music-suggestion button').disabled,true);assert.equal(d.getElementById('music-bpm').value,'100');
+ }finally{dom.window.close();}
+});
+
+
+test('version family, branch draft, detach, comparison and alternating audio',async()=>{
+ const root='2026-09-23/123456-abcdef12',child='2026-09-24/123457-abcdef13';
+ const base={status:'succeeded',created_at:'2026-09-23',has_audio:true,deleted:false,wav:{duration_seconds:12},input:{title:'원본',style:'Korean R&B',lyrics:'원본 가사',seed:7,steps:8,timeout:1800,cot:'off'}};
+ const library=[{...base,id:child,title:'수정본',song_id:root,parent_id:root,version_kind:'lyrics_revision',input:{...base.input,lyrics:'수정 가사'}},{...base,id:root,title:'원본',song_id:root,parent_id:null,version_kind:'original'}];
+ const {dom,w,d,jobs}=await setup(undefined,undefined,library);
+ try{
+  assert.equal(d.querySelectorAll('.version-group').length,1);
+  assert.equal(d.getElementById('compare-version').value,root);
+  d.getElementById('compare-versions').click();await until(()=>d.getElementById('version-diff').textContent.includes('원본 가사'));
+  d.getElementById('listen-before').click();assert.equal(d.getElementById('audio').getAttribute('src'),'/api/audio?id='+encodeURIComponent(root));
+  assert.equal(d.getElementById('selected-title').textContent,'수정본');
+  d.getElementById('listen-after').click();assert.equal(d.getElementById('audio').getAttribute('src'),'/api/audio?id='+encodeURIComponent(child));
+  w.confirm=()=>false;d.getElementById('branch-version').click();assert.equal(d.getElementById('version-draft').hidden,true);
+  w.confirm=()=>true;d.getElementById('version-kind').value='remix';d.getElementById('branch-version').click();
+  assert.equal(d.getElementById('version-draft').hidden,false);assert.equal(d.getElementById('lyrics').value,'수정 가사');
+  input(w,d.getElementById('style'),'Jazz');
+  const draft=JSON.parse(w.localStorage.getItem('music-studio-draft-v3'));assert.equal(draft.version.parent_id,child);
+  const restored=await setup(draft,undefined,library);
+  try{assert.equal(restored.d.getElementById('version-draft').hidden,false);restored.d.getElementById('detach-version').click();assert.equal(JSON.parse(restored.w.localStorage.getItem('music-studio-draft-v3')).version,null);}finally{restored.dom.window.close();}
+  d.getElementById('composer').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await until(()=>jobs.length===1);
+  assert.deepEqual(jobs[0].version,{parent_id:child,kind:'remix'});assert.equal(jobs[0].style,'Jazz');
+  assert.equal(library[0].input.style,'Korean R&B');
+  d.getElementById('reuse').click();assert.equal(d.getElementById('version-draft').hidden,true);
  }finally{dom.window.close();}
 });
