@@ -11,6 +11,7 @@ async function setup(draft,advisor,library,musicAdvisor){
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;};
  w.fetch=async(p,options)=>{
  if(musicAdvisor&&p==='/api/music/advice')return {ok:true,json:async()=>musicAdvisor(JSON.parse(options.body))};
+ if(library&&p.startsWith('/api/score?id='))return {ok:true,json:async()=>({abc:'X:1\nM:4/4\nQ:1/4=90\nK:C\nC D E F |',source:'generated'})};
  if(library&&p.startsWith('/api/versions/compare?'))return {ok:true,json:async()=>({changes:[{label:'가사',before:'원본 가사',after:'수정 가사'}]})};
  if(library&&p==='/api/state')return {ok:true,json:async()=>({tracks:library.filter(t=>!t.deleted),trash:library.filter(t=>t.deleted),ready:true,busy:false,job:null})};
  if(library&&p.startsWith('/api/tracks/')){
@@ -289,5 +290,28 @@ test('version family, branch draft, detach, comparison and alternating audio',as
   assert.deepEqual(jobs[0].version,{parent_id:child,kind:'remix'});assert.equal(jobs[0].style,'Jazz');
   assert.equal(library[0].input.style,'Korean R&B');
   d.getElementById('reuse').click();assert.equal(d.getElementById('version-draft').hidden,true);
+ }finally{dom.window.close();}
+});
+
+
+test('score edit version, explicit use, mode validation, draft restore and request preservation',async()=>{
+ const id='2026-09-24/123457-abcdef13';
+ const library=[{id,title:'악보 곡',status:'succeeded',created_at:'2026-09-24',has_audio:true,has_score:true,deleted:false,song_id:id,version_kind:'original',wav:{duration_seconds:12},input:{title:'악보 곡',style:'Korean folk',lyrics:'가사',seed:7,steps:8,timeout:1800,cot:'melody'}}];
+ const {dom,w,d,jobs}=await setup(undefined,undefined,library);
+ try{
+  assert.equal(d.getElementById('view-score').hidden,false);
+  d.getElementById('view-score').click();await until(()=>d.getElementById('score-content').textContent.includes('K:C'));
+  w.confirm=()=>false;d.getElementById('edit-score').click();await new Promise(r=>setTimeout(r,20));assert.equal(d.getElementById('abc').value,'');
+  w.confirm=()=>true;d.getElementById('edit-score').click();await until(()=>d.getElementById('use-score').checked);
+  assert.ok(d.getElementById('version-source').textContent.includes('Score Revision'));
+  input(w,d.getElementById('abc'),'X:1\nM:4/4\nQ:1/4=100\nK:C\nD E F G |');
+  d.getElementById('inspect-score').click();await until(()=>d.getElementById('score-analysis').textContent.includes('100'));
+  const draft=JSON.parse(w.localStorage.getItem('music-studio-draft-v3'));
+  const restored=await setup(draft,undefined,library);
+  try{assert.equal(restored.d.getElementById('abc').value,d.getElementById('abc').value);assert.equal(restored.d.getElementById('use-score').checked,true);}finally{restored.dom.window.close();}
+  d.getElementById('cot').value='off';d.getElementById('composer').dispatchEvent(new w.Event('submit',{cancelable:true}));assert.equal(jobs.length,0);assert.ok(d.getElementById('form-error').textContent.includes('ABC'));
+  d.getElementById('cot').value='melody';d.getElementById('composer').dispatchEvent(new w.Event('submit',{cancelable:true}));await until(()=>jobs.length===1);
+  assert.equal(jobs[0].abc,d.getElementById('abc').value);assert.equal(jobs[0].version.kind,'score_revision');
+  assert.equal(library[0].input.abc,undefined);
  }finally{dom.window.close();}
 });

@@ -13,7 +13,7 @@ import time
 import uuid
 import wave
 
-from . import metadata
+from . import metadata, score
 
 ROOT = Path(__file__).resolve().parents[2]
 SIDECARS = ["yue2-model-config.json", "yue2-generation-config.json",
@@ -51,6 +51,10 @@ def validate_input(data):
             raise ValueError(f"{field}: integer in [{low}, {high}] required")
     if data.get("cot") not in ("off", "full", "melody"):
         raise ValueError("cot must be off, full, or melody")
+    if "abc" in data:
+        score.validate_abc(data["abc"])
+        if data["cot"] == "off":
+            raise ValueError("ABC 악보는 멜로디 또는 멜로디+화성 계획 모드에서 사용하세요.")
     if len(data["lyrics"]) > 12000 or len(data["style"]) > 2000:
         raise ValueError("Input too long: lyrics <=12000 characters, style <=2000")
 
@@ -78,6 +82,10 @@ def build_command(config, data, output):
                "--session-option", "yue2.model_gguf=" + config["model"],
                "--session-option", "yue2.vae_gguf=" + config["vae"],
                "--out", str(output), "--out-format", "pcm16", "--log"]
+    if data["cot"] != "off":
+        command += ["--out-dir", str(Path(output).parent)]
+    if "abc" in data:
+        command += ["--request-option", "abc_file=" + str(Path(output).parent / "input.abc")]
     if os.name == "nt" and len(subprocess.list2cmdline(command)) > 30000:
         raise ValueError("Input exceeds Windows command line size; shorten lyrics/style")
     return command
@@ -155,6 +163,8 @@ def generate(config, data, output_root, parent_id=None, runner=None, on_started=
             on_started(folder)
         (folder / "lyrics.txt").write_text(data["lyrics"], encoding="utf-8")
         (folder / "style.txt").write_text(data["style"], encoding="utf-8")
+        if "abc" in data:
+            (folder / "input.abc").write_text(data["abc"], encoding="utf-8")
         sampler = GpuSampler(folder / "gpu.csv")
         process = None
         started = time.monotonic()
@@ -201,6 +211,12 @@ def generate(config, data, output_root, parent_id=None, runner=None, on_started=
             sampler.stop_event.set()
             if sampler.thread.ident is not None:
                 sampler.thread.join(timeout=7)
+            try:
+                artifact = score.read(folder)
+                if artifact:
+                    meta["score"] = {"source": artifact["source"], "path": "input.abc" if artifact["source"] == "provided" else "score.abc"}
+            except (OSError, ValueError) as e:
+                meta["score_error"] = str(e)
             meta["gpu"] = sampler.summary()
             meta["elapsed_seconds"] = round(time.monotonic() - started, 3)
             save_json(folder / "metadata.json", meta)
@@ -225,6 +241,7 @@ def main(argv=None):
     gen.add_argument("--steps", type=int, default=8)
     gen.add_argument("--threads", type=int, default=4)
     gen.add_argument("--timeout", type=int, default=1800)
+    gen.add_argument("--abc-file", help="UTF-8 ABC score; requires --cot melody/full")
     gen.add_argument("--cot", choices=["off", "full", "melody"], default="off")
     gen.add_argument("--dry-run", action="store_true")
     replay = sub.add_parser("replay")
@@ -253,6 +270,8 @@ def main(argv=None):
         if args.action == "generate":
             data = {k: getattr(args, k) for k in ("title", "style", "seed", "steps", "threads", "timeout", "cot")}
             data["lyrics"] = Path(args.lyrics_file).read_text(encoding="utf-8-sig")
+            if args.abc_file:
+                data["abc"] = Path(args.abc_file).read_text(encoding="utf-8-sig")
         validate_input(data)
         if args.dry_run:
             print(json.dumps(build_command(config, data, ROOT / "outputs/PREVIEW/audio.wav"), ensure_ascii=False, indent=2))

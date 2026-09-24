@@ -1,7 +1,7 @@
 """Read-only lineage projection for old replay metadata and new version records."""
 from collections import defaultdict
 
-KINDS = {'original':'Original', 'variation':'Variation', 'lyrics_revision':'Lyrics Revision', 'remix':'Remix', 'replay':'Replay'}
+KINDS = {'original':'Original', 'variation':'Variation', 'lyrics_revision':'Lyrics Revision', 'remix':'Remix', 'replay':'Replay', 'score_revision':'Score Revision'}
 
 def annotate(tracks):
     by_id = {t['id']:t for t in tracks}
@@ -34,7 +34,7 @@ def annotate(tracks):
     return tracks
 
 def compare(left, right):
-    labels={'title':'곡 제목','lyrics':'가사','style':'최종 스타일','seed':'시드','steps':'합성 스텝','threads':'스레드','timeout':'제한 시간','cot':'내부 계획 모드'}
+    labels={'abc':'입력 ABC 악보','title':'곡 제목','lyrics':'가사','style':'최종 스타일','seed':'시드','steps':'합성 스텝','threads':'스레드','timeout':'제한 시간','cot':'내부 계획 모드'}
     result=[]
     for key,label in labels.items():
         a=left['input'].get(key);b=right['input'].get(key)

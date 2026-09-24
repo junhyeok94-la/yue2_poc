@@ -10,7 +10,7 @@ import time
 from urllib.parse import urlsplit, parse_qs
 import uuid
 
-from . import cli, metadata, music, versions
+from . import cli, metadata, music, versions, score
 from .lyrics.guides import workshop
 from .lyrics.importer import import_lyrics
 from .domain.section import text
@@ -49,6 +49,7 @@ class Studio:
         run_id = folder.relative_to(self.output_root).as_posix()
         details = self.library_details(folder)
         return {"schema_version": meta.get("schema_version", 1), "id": run_id, "title": details.get("title", meta["input"]["title"]), "deleted": details.get("deleted", False), "input": meta["input"],
+                "has_score": (folder / "input.abc").is_file() or (folder / "score.abc").is_file(),
                 "_legacy_parent": meta.get("parent_id"),
                 "_version": cli.read_json(folder / "version.json") if (folder / "version.json").is_file() else {},
                 "status": meta["status"], "created_at": meta["created_at"],
@@ -100,7 +101,7 @@ class Studio:
         source_id = replay_id
         if not replay_id and "version" in payload:
             version = payload["version"]
-            if not isinstance(version, dict) or set(version) != {"parent_id", "kind"} or version.get("kind") not in ("variation", "lyrics_revision", "remix"):
+            if not isinstance(version, dict) or set(version) != {"parent_id", "kind"} or version.get("kind") not in ("variation", "lyrics_revision", "remix", "score_revision"):
                 raise ValueError("버전의 원본과 종류를 확인하세요.")
             source_id = version["parent_id"]
             self.folder(source_id)
@@ -131,6 +132,8 @@ class Studio:
                         raise ValueError("음악 설정과 style을 동시에 보낼 수 없습니다.")
                     data["music_settings"] = music.validate_settings(payload["music_settings"])
                     data["style"] = music.compile_style(data["music_settings"])
+            if "abc" in payload:
+                data["abc"] = score.validate_abc(payload["abc"])
             config, parent = self.config, source["id"] if source_id else None
         cli.validate_input(data)
         if len(data["title"]) > 160:
@@ -234,11 +237,27 @@ def make_handler(studio):
                         ready, issue = False, str(e)
                     self.respond({"tracks": studio.library(), "trash": studio.library(deleted=True), "job": studio.status(), "ready": ready,
                                   "issue": issue, "busy": (studio.output_root / ".generation.lock").exists()})
+                elif url.path == "/api/score":
+                    query = parse_qs(url.query)
+                    artifact = score.read(studio.folder(query.get("id", [""])[0]))
+                    if not artifact:
+                        raise FileNotFoundError("이 곡에는 저장된 ABC 악보가 없습니다.")
+                    if "download" in query:
+                        content = artifact["abc"].encode("utf-8")
+                        self.send_headers(200, "text/plain; charset=utf-8", len(content), {"Content-Disposition": 'attachment; filename="score.abc"'})
+                        if self.command != "HEAD": self.wfile.write(content)
+                    else:
+                        self.respond(artifact)
                 elif url.path == "/api/versions/compare":
                     query = parse_qs(url.query)
                     left = cli.read_json(studio.folder(query.get("left", [""])[0]) / "metadata.json")
                     right = cli.read_json(studio.folder(query.get("right", [""])[0]) / "metadata.json")
-                    self.respond({"changes": versions.compare(left, right)})
+                    changes = versions.compare(left, right)
+                    a = score.read(studio.folder(query["left"][0]))
+                    b = score.read(studio.folder(query["right"][0]))
+                    if a != b:
+                        changes.append({"field": "score_artifact", "label": "보관된 ABC 악보", "before": a, "after": b})
+                    self.respond({"changes": changes})
                 elif url.path in ("/api/audio", "/api/metadata"):
                     query = parse_qs(url.query)
                     folder = studio.folder(query.get("id", [""])[0])
@@ -329,7 +348,7 @@ def make_handler(studio):
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                limit = 131072 if self.path in ("/api/song/preview", "/api/song/import", "/api/jobs") else 65536
+                limit = 131072 if self.path in ("/api/song/preview", "/api/song/import", "/api/jobs", "/api/score/inspect") else 65536
                 if not 0 < length <= limit:
                     self.discard_body()
                     self.respond({"error": "입력 크기가 허용 범위를 초과했습니다."}, 413)
@@ -341,6 +360,9 @@ def make_handler(studio):
                     raise ValueError("잘못된 입력입니다.")
                 if self.path in ("/api/tracks/rename", "/api/tracks/delete", "/api/tracks/restore"):
                     self.respond(studio.manage_track(self.path.rsplit("/", 1)[1], data.get("id"), data.get("title")))
+                    return
+                if self.path == "/api/score/inspect":
+                    self.respond(score.inspect(data.get("abc")))
                     return
                 if self.path == "/api/music/preview":
                     settings = music.validate_settings(data.get("music_settings"))
@@ -360,7 +382,7 @@ def make_handler(studio):
                     self.respond({"sections": import_lyrics(lyrics)})
                     return
                 if self.path == "/api/jobs":
-                    if "song" not in data and length > 65536:
+                    if "song" not in data and "abc" not in data and length > 65536:
                         self.respond({"error": "기존 입력은 64KB 이하여야 합니다."}, 413)
                         return
                     job = studio.start(data)

@@ -3,6 +3,12 @@
 Windows / RTX 3060 12GB에서 YuE2 GGUF를 실행하는 로컬 음악 생성 웹 스튜디오와 CLI.
 Python은 실행·이력 관리에만 사용하고 실제 추론은 audio.cpp CUDA가 수행합니다.
 
+## v0.7 ABC Score Workshop · 실험 기능
+
+멜로디/화성 계획 모드에서 생성 악보를 보관하고, ABC 텍스트를 수정하여 새 버전으로 재생성합니다.
+악보 보기·다운로드·파일 가져오기·헤더 확인과 Score Revision 이력을 지원합니다.
+[사용법·실제 GPU 검증·제한 사항](docs/10-v0.7-score-workshop.md).
+
 ## v0.6 Song Versions
 
 라이브러리에서 곡을 선택하고 “이 곡에서 새 버전”으로 Variation·Lyrics Revision·Remix를 만들 수 있습니다.
