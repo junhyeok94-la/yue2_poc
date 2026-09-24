@@ -3,6 +3,12 @@
 Windows / RTX 3060 12GB에서 YuE2 GGUF를 실행하는 로컬 음악 생성 웹 스튜디오와 CLI.
 Python은 실행·이력 관리에만 사용하고 실제 추론은 audio.cpp CUDA가 수행합니다.
 
+## v0.8 작업 영역 정리
+
+WRITE(구조·가사), COMPOSE(음악 방향), ARRANGE(고급 설정·ABC), VERSIONS(비교·새 버전)로 편집 영역을 나눴습니다.
+공통 곡 상태와 생성 버튼을 유지하며 탭 전환은 입력이나 AI 제안을 초기화하지 않습니다.
+[변경 구조·사용 흐름·검증 및 남은 화면 검수](docs/11-v0.8-workspaces.md).
+
 ## v0.7 ABC Score Workshop · 실험 기능
 
 멜로디/화성 계획 모드에서 생성 악보를 보관하고, ABC 텍스트를 수정하여 새 버전으로 재생성합니다.

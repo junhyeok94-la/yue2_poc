@@ -5,7 +5,7 @@ const path=require('node:path');
 const {JSDOM}=require(require.resolve('jsdom',{paths:[process.env.MUSIC_STUDIO_TEST_DEPS||path.join(__dirname,'../outputs/ui-test')]}));
 const base='http://127.0.0.1:7860';
 async function until(fn){for(let i=0;i<100;i++){if(fn())return;await new Promise(r=>setTimeout(r,20));}throw new Error('UI condition timed out');}
-async function setup(draft,advisor,library,musicAdvisor){
+async function setup(draft,advisor,library,musicAdvisor,workspace){
  const dom=new JSDOM(fs.readFileSync(path.join(__dirname,'../ui/index.html'),'utf8'),{url:base,runScripts:'outside-only'});
  const w=dom.window;const jobs=[];w.HTMLMediaElement.prototype.pause=function(){};w.HTMLMediaElement.prototype.load=function(){};w.HTMLMediaElement.prototype.play=()=>Promise.resolve();w.confirm=()=>true;w.HTMLElement.prototype.scrollIntoView=()=>{};
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;};
@@ -21,6 +21,7 @@ async function setup(draft,advisor,library,musicAdvisor){
    return {ok:true,json:async()=>JSON.parse(JSON.stringify(track))};
  }
 if(advisor&&p==='/api/advisor'){return {ok:true,json:async()=>options?.body?advisor(JSON.parse(options.body)):{configured:true,model:'test'}};}if(p==='/api/jobs'){jobs.push(JSON.parse(options.body));return {ok:true,json:async()=>({id:'test'})};}const response=await fetch(new URL(p,base),options);if(p==='/api/state'){const state=await response.json();return {ok:true,json:async()=>({...state,job:null,busy:false})};}return response;};
+ if(workspace)w.localStorage.setItem('music-studio-workspace-v8',workspace);
  if(draft)w.localStorage.setItem('music-studio-draft',JSON.stringify(draft));
  w.eval(fs.readFileSync(path.join(__dirname,'../ui/song-editor.js'),'utf8'));
  w.eval(fs.readFileSync(path.join(__dirname,'../ui/music-guide.js'),'utf8'));
@@ -273,7 +274,7 @@ test('version family, branch draft, detach, comparison and alternating audio',as
  const library=[{...base,id:child,title:'수정본',song_id:root,parent_id:root,version_kind:'lyrics_revision',input:{...base.input,lyrics:'수정 가사'}},{...base,id:root,title:'원본',song_id:root,parent_id:null,version_kind:'original'}];
  const {dom,w,d,jobs}=await setup(undefined,undefined,library);
  try{
-  assert.equal(d.querySelectorAll('.version-group').length,1);
+  assert.equal(d.querySelectorAll('.version-group').length,1);assert.ok(d.querySelector('.version-tree ul'));assert.ok(d.getElementById('version-list').textContent.includes('Lyrics Revision'));
   assert.equal(d.getElementById('compare-version').value,root);
   d.getElementById('compare-versions').click();await until(()=>d.getElementById('version-diff').textContent.includes('원본 가사'));
   d.getElementById('listen-before').click();assert.equal(d.getElementById('audio').getAttribute('src'),'/api/audio?id='+encodeURIComponent(root));
@@ -311,7 +312,65 @@ test('score edit version, explicit use, mode validation, draft restore and reque
   try{assert.equal(restored.d.getElementById('abc').value,d.getElementById('abc').value);assert.equal(restored.d.getElementById('use-score').checked,true);}finally{restored.dom.window.close();}
   d.getElementById('cot').value='off';d.getElementById('composer').dispatchEvent(new w.Event('submit',{cancelable:true}));assert.equal(jobs.length,0);assert.ok(d.getElementById('form-error').textContent.includes('ABC'));
   d.getElementById('cot').value='melody';d.getElementById('composer').dispatchEvent(new w.Event('submit',{cancelable:true}));await until(()=>jobs.length===1);
-  assert.equal(jobs[0].abc,d.getElementById('abc').value);assert.equal(jobs[0].version.kind,'score_revision');
+  assert.equal(jobs[0].abc,d.getElementById('abc').value);assert.equal(jobs[0].version.kind,'score_revision');assert.equal(d.getElementById('workspace-arrange').hidden,false);
   assert.equal(library[0].input.abc,undefined);
+ }finally{dom.window.close();}
+});
+
+
+test('workspace tabs preserve exact draft nodes, values, keyboard navigation and generation payload',async()=>{
+ const {dom,w,d,jobs}=await setup();
+ try{
+  assert.equal(d.getElementById('workspace-write').hidden,false);
+  assert.equal(d.querySelectorAll('[role=tabpanel]:not([hidden])').length,1);
+  assert.equal(d.getElementById('advanced-key').open,false);
+  d.getElementById('add-section').click();const lyrics=d.querySelector('#section-cards textarea');input(w,lyrics,'유지할 가사');
+  input(w,d.getElementById('music-bpm'),'90');input(w,d.getElementById('abc'),'K:C\nC D E F |');
+  const before=w.localStorage.getItem('music-studio-draft-v3');
+  for(const name of ['compose','arrange','versions','write']){
+   d.getElementById('tab-'+name).click();assert.equal(d.getElementById('workspace-'+name).hidden,false);
+   assert.equal(d.querySelectorAll('[role=tabpanel]:not([hidden])').length,1);
+   assert.equal(d.querySelector('#section-cards textarea'),lyrics);
+   assert.equal(w.localStorage.getItem('music-studio-draft-v3'),before);
+  }
+  d.getElementById('tab-write').dispatchEvent(new w.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));
+  assert.equal(d.activeElement.id,'tab-compose');assert.equal(d.getElementById('tab-compose').getAttribute('aria-selected'),'true');
+  assert.equal(w.localStorage.getItem('music-studio-workspace-v8'),'compose');
+  assert.ok(d.getElementById('status-write').textContent.includes('✓'));
+  assert.equal(d.querySelectorAll('#composer button[type=submit]').length,1);
+  d.getElementById('composer').dispatchEvent(new w.Event('submit',{cancelable:true}));await until(()=>jobs.length===1);
+  assert.equal(jobs[0].song.sections[0].lyrics[0],'유지할 가사');assert.equal(jobs[0].song.music_settings.bpm,90);assert.equal(jobs[0].abc,undefined);
+  const reopened=await setup(JSON.parse(before),undefined,undefined,undefined,'arrange');
+  try{assert.equal(reopened.d.getElementById('workspace-arrange').hidden,false);assert.equal(reopened.d.getElementById('abc').value,'K:C\nC D E F |');}finally{reopened.dom.window.close();}
+ }finally{dom.window.close();}
+});
+
+test('hidden invalid inputs open their workspace and disclosure before generation',async()=>{
+ const {dom,w,d,jobs}=await setup();
+ try{
+  input(w,d.getElementById('seed'),'-1');
+  d.getElementById('composer').dispatchEvent(new w.Event('submit',{cancelable:true}));
+  assert.equal(jobs.length,0);assert.equal(d.getElementById('workspace-arrange').hidden,false);
+  assert.equal(d.querySelector('.advanced').open,true);assert.equal(d.activeElement.id,'seed');
+  input(w,d.getElementById('seed'),'7');input(w,d.getElementById('style'),'');
+  d.getElementById('tab-write').click();d.getElementById('composer').dispatchEvent(new w.Event('submit',{cancelable:true}));
+  assert.equal(jobs.length,0);assert.equal(d.getElementById('workspace-compose').hidden,false);assert.equal(d.activeElement.id,'style');
+ }finally{dom.window.close();}
+});
+
+test('AI suggestions remain applicable across workspace switches and advice opens on request only',async()=>{
+ let calls=0;
+ const advisor=async payload=>({suggestions:[{id:'one',section_id:payload.section.id,line_index:0,original:payload.section.lyrics[0],suggested:'새로운 가사',reason:'표현',type:'expression'}]});
+ const musicAdvisor=async()=>{calls++;return {suggestions:[]};};
+ const {dom,w,d}=await setup(undefined,advisor,undefined,musicAdvisor);
+ try{
+  assert.equal(d.getElementById('music-advice-body').hidden,true);assert.equal(calls,0);
+  d.getElementById('add-section').click();input(w,d.querySelector('#section-cards textarea'),'원래 가사');
+  await until(()=>!d.querySelector('[data-action=review]').disabled);d.querySelector('[data-action=review]').click();await until(()=>d.querySelector('.suggestion'));
+  const apply=d.querySelector('.suggestion button');
+  d.getElementById('tab-compose').click();d.getElementById('tab-arrange').click();d.getElementById('tab-write').click();
+  assert.equal(apply.disabled,false);apply.click();assert.equal(d.querySelector('#section-cards textarea').value,'새로운 가사');
+  d.getElementById('tab-compose').click();await until(()=>!d.getElementById('music-advise').disabled);d.getElementById('music-advise').click();await until(()=>calls===1);
+  assert.equal(d.getElementById('music-advice-body').hidden,false);
  }finally{dom.window.close();}
 });

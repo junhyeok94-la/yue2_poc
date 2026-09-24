@@ -82,14 +82,14 @@ class SongEditor {
       lyrics.oninput=()=>{s.lyrics=lyrics.value===''?[]:lyrics.value.replace(/\r\n?/g,'\n').split('\n');this.changed();};card.append(lyrics);
       card.append(node('p','분석 준비 중…','analysis-summary'));
       const details=node('details');details.append(node('summary','가사 분석'));details.append(node('pre','','analysis-detail'));details.append(node('p','한글 완성형 글자 수의 근사치입니다. 영어·숫자는 세지 않으며 실제 가창 음절과 다를 수 있습니다.','field-foot'));card.append(details);
-      const guide=node('details');guide.append(node('summary','Guide · 왜?'));
+      const guide=node('details');guide.append(node('summary','왜? · Section 가이드'));
       const info=this.types.find(t=>t.type===s.type);guide.append(node('p',info?.description||'가이드를 불러오는 중입니다.'));
       for(const opt of info?.options||[]){const item=node('div',undefined,'guide-option');const choose=node('button',opt.bars+' bars','quiet-button');choose.type='button';choose.onclick=()=>{s.bars=opt.bars;bars.value=opt.bars;this.changed();};item.append(choose,node('span',opt.reason));guide.append(item);}
       card.append(guide);
       const assistant=node('section',undefined,'ai-assistant');assistant.append(node('h4','AI Lyrics Assistant'));
       assistant.append(node('p','요청하면 이 Section의 가사·구조와 곡 제목·스타일이 Google Gemini로 전송됩니다. 자동 적용하지 않습니다.','field-foot'));
       const aiActions=node('div',undefined,'section-actions');
-      for(const [action,title] of [['review','가사 검토'],['rhyme','라임 검토'],['hook','Hook 강화'],['suggest','다음 1~2줄 제안']]){
+      for(const [action,title] of [['review','검토하기 · 가사'],['rhyme','라임 검토'],['hook','Hook 강화'],['suggest','다음 1~2줄 제안']]){
         const button=node('button',title,'quiet-button ai-request');button.type='button';button.dataset.action=action;
         button.onclick=()=>this.askAdvice(s.id,action);aiActions.append(button);
       }

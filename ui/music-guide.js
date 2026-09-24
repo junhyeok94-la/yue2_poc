@@ -48,6 +48,7 @@ class MusicGuide {
   }
   async advise(){
     if(this.pending||!this.configured)return;
+    document.getElementById('music-advice-body').hidden=false;
     this.pending=true;this.items=[];this.batchRevision=this.revision;this.paint();document.getElementById('music-advice-status').textContent='설정을 검토하고 있습니다…';
     try{const result=await this.api('/api/music/advice',{music_settings:this.settings(),title:document.getElementById('title').value.trim()});
       this.items=result.suggestions;document.getElementById('music-advice-status').textContent=this.batchRevision!==this.revision?'요청 후 설정이 바뀌었습니다. 다시 조언을 요청하세요.':this.items.length?'적용할 항목을 직접 선택하세요.':'현재 설정에 추가 제안이 없습니다.';
