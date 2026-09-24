@@ -187,7 +187,7 @@ test('library rename, cancelled delete, trash and restore update player and sear
  try{
    await until(()=>d.getElementById('selected-title').textContent==='원래 제목');
    const source=d.getElementById('audio').getAttribute('src');
-   d.getElementById('rename-track').click();
+   d.querySelector('[data-track-action=rename]').click();
    input(w,d.getElementById('track-name'),'바꾼 이름');
    d.getElementById('rename-form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
    await until(()=>d.getElementById('selected-title').textContent==='바꾼 이름');
@@ -196,8 +196,8 @@ test('library rename, cancelled delete, trash and restore update player and sear
    assert.equal(library[0].input.title,'원래 제목');
    input(w,d.getElementById('search'),'바꾼 이름');
    assert.equal(d.querySelectorAll('#tracks .track').length,1);
-   w.confirm=()=>false;d.getElementById('delete-track').click();assert.equal(library[0].deleted,false);
-   w.confirm=()=>true;d.getElementById('delete-track').click();
+   w.confirm=()=>false;d.querySelector('[data-track-action=delete]').click();assert.equal(library[0].deleted,false);
+   w.confirm=()=>true;d.querySelector('[data-track-action=delete]').click();
    await until(()=>d.getElementById('selected').hidden);
    assert.equal(d.getElementById('audio').getAttribute('src'),null);
    assert.equal(d.getElementById('download').getAttribute('href'),null);
@@ -206,8 +206,8 @@ test('library rename, cancelled delete, trash and restore update player and sear
    assert.equal(d.querySelectorAll('#tracks .track').length,1);
    d.querySelector('#tracks .track').click();
    assert.equal(d.getElementById('replay').disabled,true);
-   assert.equal(d.getElementById('restore-track').hidden,false);
-   d.getElementById('restore-track').click();
+   assert.equal(d.querySelector('[data-track-action=restore]').hidden,false);
+   d.querySelector('[data-track-action=restore]').click();
    await until(()=>!library[0].deleted);
    d.querySelector('[data-filter="all"]').click();
    await until(()=>d.querySelector('#tracks .track'));
@@ -372,5 +372,26 @@ test('AI suggestions remain applicable across workspace switches and advice open
   assert.equal(apply.disabled,false);apply.click();assert.equal(d.querySelector('#section-cards textarea').value,'새로운 가사');
   d.getElementById('tab-compose').click();await until(()=>!d.getElementById('music-advise').disabled);d.getElementById('music-advise').click();await until(()=>calls===1);
   assert.equal(d.getElementById('music-advice-body').hidden,false);
+ }finally{dom.window.close();}
+});
+
+
+test('playlist manages an unselected track without selecting or playing it',async()=>{
+ const base={status:'succeeded',created_at:'2026-09-24',has_audio:true,deleted:false,wav:{duration_seconds:12},input:{title:'원본',style:'Korean',lyrics:'가사',seed:7}};
+ const library=[{...base,id:'2026-09-24/123456-abcdef12',title:'재생 곡'},{...base,id:'2026-09-24/123457-abcdef13',title:'관리할 곡'}];
+ const {dom,w,d}=await setup(undefined,undefined,library);
+ try{
+  let plays=0;w.HTMLMediaElement.prototype.play=()=>{plays++;return Promise.resolve();};
+  const source=d.getElementById('audio').getAttribute('src');
+  const action=name=>Array.from(d.querySelectorAll('[data-track-action]')).find(b=>b.dataset.trackId===library[1].id&&b.dataset.trackAction===name);
+  assert.equal(d.querySelector('#selected [data-track-action]'),null);
+  action('rename').click();assert.equal(d.getElementById('track-name').value,'관리할 곡');
+  input(w,d.getElementById('track-name'),'새 이름');d.getElementById('rename-form').dispatchEvent(new w.Event('submit',{cancelable:true}));
+  await until(()=>library[1].title==='새 이름'&&!d.getElementById('rename-dialog').open);
+  assert.equal(d.getElementById('selected-title').textContent,'재생 곡');assert.equal(d.getElementById('audio').getAttribute('src'),source);
+  action('delete').click();await until(()=>library[1].deleted&&!action('delete'));
+  assert.equal(d.getElementById('selected-title').textContent,'재생 곡');assert.equal(d.getElementById('audio').getAttribute('src'),source);assert.equal(plays,0);
+  d.querySelector('[data-filter=trash]').click();action('restore').click();await until(()=>!library[1].deleted&&!action('restore'));
+  assert.equal(d.getElementById('selected-title').textContent,'재생 곡');assert.equal(plays,0);
  }finally{dom.window.close();}
 });

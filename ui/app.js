@@ -33,8 +33,7 @@ function updateActions(){ $('generate').disabled=sending||busy||!ready;$('genera
   $('reuse').disabled=!!track?.deleted;
   $('edit-score').disabled=busy||!track?.has_score||!!track?.deleted;
   $('branch-version').disabled=busy||!track||!!track.deleted||track.status==='running';
-  for(const id of ['rename-track','delete-track','restore-track'])$(id).disabled=managing||busy||!track;
-  $('delete-track').hidden=!!track?.deleted;$('restore-track').hidden=!track?.deleted;renderSongStatus(); }
+  document.querySelectorAll('[data-track-action]').forEach(button=>{const item=tracks.find(t=>t.id===button.dataset.trackId);button.disabled=managing||busy||!item||item.status==='running';});renderSongStatus(); }
 async function api(path,data){const response=await fetch(path,data?{method:'POST',headers:{'Content-Type':'application/json','X-Studio-Request':'1'},body:JSON.stringify(data)}:{});const result=await response.json();if(!response.ok){const failure=new Error(result.error||'요청에 실패했습니다.');failure.field=result.field;failure.section_id=result.section_id;throw failure;}return result;}
 function element(tag,className,text){const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;}
 function renderTracks(force=false){
@@ -53,7 +52,15 @@ function renderTracks(force=false){
     const button=element('button',`track${track.id===selectedId?' selected':''}`);button.type='button';button.setAttribute('aria-label',`${track.title} 선택`);button.setAttribute('aria-pressed',String(track.id===selectedId));
     const art=element('span','track-art',track.has_audio?'▶':'♪');art.setAttribute('aria-hidden','true');button.append(art);
     const copy=element('span','track-copy');copy.append(element('strong','',track.title),element('span','style-preview',track.input.style),element('span','track-date',`${new Date(track.created_at).toLocaleDateString('ko-KR')} · ${track.deleted?'휴지통':labels[track.status]||track.status} · ${versionLabels[track.version_kind]||'Original'}`));button.append(copy,element('span','track-time',track.wav?clock(track.wav.duration_seconds):'—'));
-    button.addEventListener('click',()=>select(track.id,true));$('tracks').append(button);
+    button.addEventListener('click',()=>select(track.id,true));
+    const row=element('div','playlist-row');row.dataset.trackId=track.id;
+    const actions=element('div','playlist-actions');actions.setAttribute('role','group');actions.setAttribute('aria-label',track.title+' 관리');
+    for(const [action,label] of [['rename','이름 변경'],[track.deleted?'restore':'delete',track.deleted?'복원':'삭제']]){
+      const control=element('button','quiet-button',label);control.type='button';control.dataset.trackAction=action;control.dataset.trackId=track.id;
+      control.setAttribute('aria-label',track.title+' '+label);control.disabled=managing||busy||track.status==='running';
+      control.onclick=()=>{if(action==='rename')renameTrack(track.id);else if(action==='delete')deleteTrack(track.id);else manageTrack('restore',track.id);};actions.append(control);
+    }
+    row.append(button,actions);$('tracks').append(row);
     }
   }
 }
@@ -116,6 +123,9 @@ $('audio').addEventListener('error',()=>{if($('audio').getAttribute('src'))notif
 
 function clearSelection(){
   selectedId=null;versionsKey='';comparisonRevision++;$('selected').hidden=true;$('selected-score').hidden=true;$('versions-content').hidden=true;$('versions-empty').hidden=false;$('arrange-selection').textContent='보관된 악보를 보려면 라이브러리에서 곡을 선택하세요.';renderSongStatus();
+  clearPlayer();
+}
+function clearPlayer(){
   $('audio').pause();$('audio').removeAttribute('src');$('audio').load();
   $('player-title').textContent='라이브러리에서 곡을 선택하세요';$('player-subtitle').textContent='';
   $('download').removeAttribute('href');$('download').classList.add('disabled');$('download').setAttribute('aria-disabled','true');
@@ -126,26 +136,26 @@ async function manageTrack(action,id,title){
   try{
     const track=await api('/api/tracks/'+action,{id,title});managementRevision++;
     tracks=tracks.map(t=>t.id===id?track:t);
-    if(action==='delete'||action==='restore'){if(selectedId===id)clearSelection();}
-    else if(selectedId===id)select(id);
-    renderTracks(true);
+    const playing=$('audio').getAttribute('src')==='/api/audio?id='+encodeURIComponent(id);
+    if(action==='delete'||action==='restore'){if(selectedId===id)clearSelection();else if(playing)clearPlayer();}
+    else{if(selectedId===id)$('selected-title').textContent=track.title;if(playing)$('player-title').textContent=track.title;}
+    renderVersions();renderTracks(true);
     notify(action==='rename'?'곡 이름을 변경했습니다.':action==='delete'?'휴지통으로 이동했습니다. 휴지통에서 복원할 수 있어요.':'라이브러리에 복원했습니다.');
     return true;
   }catch(e){if(action==='rename')$('manage-error').textContent=e.message;else notify(e.message);return false;}
   finally{managing=false;$('save-track-name').disabled=false;updateActions();}
 }
-$('rename-track').onclick=()=>{
-  const track=tracks.find(t=>t.id===selectedId);if(!track)return;
+function renameTrack(id){
+  const track=tracks.find(t=>t.id===id);if(!track||managing||busy||track.status==='running')return;
   renameId=track.id;$('track-name').value=track.title;$('manage-error').textContent='';
   $('rename-dialog').showModal();$('track-name').focus();
 };
 $('cancel-rename').onclick=()=>$('rename-dialog').close();
 $('rename-form').onsubmit=async event=>{event.preventDefault();if(await manageTrack('rename',renameId,$('track-name').value.trim()))$('rename-dialog').close();};
-$('delete-track').onclick=()=>{
-  const track=tracks.find(t=>t.id===selectedId);
+function deleteTrack(id){
+  const track=tracks.find(t=>t.id===id);if(!track||managing||busy||track.status==='running')return;
   if(track&&confirm('“'+track.title+'”을 휴지통으로 이동할까요? 음원과 생성 기록은 보관되며 복원할 수 있습니다.'))manageTrack('delete',track.id);
 };
-$('restore-track').onclick=()=>{if(selectedId)manageTrack('restore',selectedId);};
 
 $('inspect-score').onclick=async()=>{
   const abc=$('abc').value;
