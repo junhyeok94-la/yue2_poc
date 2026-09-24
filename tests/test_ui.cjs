@@ -5,11 +5,12 @@ const path=require('node:path');
 const {JSDOM}=require(require.resolve('jsdom',{paths:[process.env.MUSIC_STUDIO_TEST_DEPS||path.join(__dirname,'../outputs/ui-test')]}));
 const base='http://127.0.0.1:7860';
 async function until(fn){for(let i=0;i<100;i++){if(fn())return;await new Promise(r=>setTimeout(r,20));}throw new Error('UI condition timed out');}
-async function setup(draft,advisor,library){
+async function setup(draft,advisor,library,musicAdvisor){
  const dom=new JSDOM(fs.readFileSync(path.join(__dirname,'../ui/index.html'),'utf8'),{url:base,runScripts:'outside-only'});
  const w=dom.window;const jobs=[];w.HTMLMediaElement.prototype.pause=function(){};w.HTMLMediaElement.prototype.load=function(){};w.HTMLMediaElement.prototype.play=()=>Promise.resolve();w.confirm=()=>true;w.HTMLElement.prototype.scrollIntoView=()=>{};
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;};
  w.fetch=async(p,options)=>{
+ if(musicAdvisor&&p==='/api/music/advice')return {ok:true,json:async()=>musicAdvisor(JSON.parse(options.body))};
  if(library&&p==='/api/state')return {ok:true,json:async()=>({tracks:library.filter(t=>!t.deleted),trash:library.filter(t=>t.deleted),ready:true,busy:false,job:null})};
  if(library&&p.startsWith('/api/tracks/')){
    const data=JSON.parse(options.body),track=library.find(t=>t.id===data.id);
@@ -20,6 +21,7 @@ async function setup(draft,advisor,library){
 if(advisor&&p==='/api/advisor'){return {ok:true,json:async()=>options?.body?advisor(JSON.parse(options.body)):{configured:true,model:'test'}};}if(p==='/api/jobs'){jobs.push(JSON.parse(options.body));return {ok:true,json:async()=>({id:'test'})};}const response=await fetch(new URL(p,base),options);if(p==='/api/state'){const state=await response.json();return {ok:true,json:async()=>({...state,job:null,busy:false})};}return response;};
  if(draft)w.localStorage.setItem('music-studio-draft',JSON.stringify(draft));
  w.eval(fs.readFileSync(path.join(__dirname,'../ui/song-editor.js'),'utf8'));
+ w.eval(fs.readFileSync(path.join(__dirname,'../ui/music-guide.js'),'utf8'));
  w.eval(fs.readFileSync(path.join(__dirname,'../ui/app.js'),'utf8'));
  try {await until(()=>!w.document.getElementById('add-section').disabled);
  await until(()=>w.document.getElementById('connection').textContent==='로컬 스튜디오 연결됨');
@@ -209,5 +211,55 @@ test('library rename, cancelled delete, trash and restore update player and sear
    d.querySelector('#tracks .track').click();
    assert.equal(d.getElementById('selected-title').textContent,'바꾼 이름');
    assert.equal(d.getElementById('replay').disabled,false);
+ }finally{dom.window.close();}
+});
+
+
+test('music settings persist, compile, submit in both modes and reuse without duplication',async()=>{
+ const {dom,w,d,jobs}=await setup();
+ try{
+  input(w,d.getElementById('style'),'Korean');
+  input(w,d.getElementById('music-bpm'),'82');input(w,d.getElementById('music-key'),'A minor');
+  input(w,d.getElementById('music-instruments'),'piano, bass');
+  await until(()=>d.getElementById('style-preview').textContent==='82 BPM, A minor, piano, bass, Korean');
+  assert.ok(d.getElementById('why-bpm').textContent.includes('분당'));
+  const saved=JSON.parse(w.localStorage.getItem('music-studio-draft-v3'));
+  assert.equal(saved.music_settings.bpm,82);
+  const restored=await setup(saved);
+  try{assert.equal(restored.d.getElementById('music-bpm').value,'82');assert.equal(restored.d.getElementById('style').value,'Korean');}finally{restored.dom.window.close();}
+  d.getElementById('add-section').click();input(w,d.querySelector('#section-cards textarea'),'노래');
+  d.getElementById('composer').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+  await until(()=>jobs.length===1);assert.equal(jobs[0].song.music_settings.bpm,82);
+  const raw=await setup({title:'raw',style:'compiled old',lyrics:'노래',music_settings:saved.music_settings});
+  try{
+   assert.equal(raw.d.getElementById('style').value,'Korean');
+   raw.d.getElementById('composer').dispatchEvent(new raw.w.Event('submit',{bubbles:true,cancelable:true}));
+   await until(()=>raw.jobs.length===1);assert.equal(raw.jobs[0].style,undefined);assert.equal(raw.jobs[0].music_settings.bpm,82);
+  }finally{raw.dom.window.close();}
+ }finally{dom.window.close();}
+});
+
+test('music advice applies independently, ignores, and blocks late or stale results',async()=>{
+ let release, delayed=false;
+ const fake=async payload=>{
+  if(delayed)await new Promise(resolve=>release=resolve);
+  return {suggestions:[{id:'bpm',field:'bpm',original:String(payload.music_settings.bpm||''),suggested:'90',reason:'템포 조언'},
+   {id:'key',field:'key',original:'',suggested:'C major',reason:'조성 조언'},
+   {id:'genre',field:'genre',original:'',suggested:'Pop',reason:'장르 조언'}]};
+ };
+ const {dom,w,d}=await setup(undefined,()=>({suggestions:[]}),undefined,fake);
+ try{
+  await until(()=>!d.getElementById('music-advise').disabled);
+  d.getElementById('music-advise').click();await until(()=>d.querySelectorAll('.music-suggestion').length===3);
+  assert.equal(d.getElementById('music-bpm').value,'');
+  d.querySelector('.music-suggestion button').click();assert.equal(d.getElementById('music-bpm').value,'90');
+  assert.equal(d.querySelector('.music-suggestion button').disabled,false);
+  d.querySelector('.music-suggestion button').click();assert.equal(d.getElementById('music-key').value,'C major');
+  d.querySelector('.music-suggestion button:last-child').click();assert.equal(d.getElementById('music-genre').value,'');
+  d.getElementById('music-advise').click();await until(()=>d.querySelectorAll('.music-suggestion').length===3);
+  input(w,d.getElementById('style'),'changed');assert.equal(d.querySelector('.music-suggestion button').disabled,true);
+  delayed=true;d.getElementById('music-advise').click();await until(()=>release);
+  input(w,d.getElementById('music-bpm'),'100');release();await until(()=>d.querySelectorAll('.music-suggestion').length===3);
+  assert.equal(d.querySelector('.music-suggestion button').disabled,true);assert.equal(d.getElementById('music-bpm').value,'100');
  }finally{dom.window.close();}
 });

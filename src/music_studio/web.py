@@ -10,7 +10,7 @@ import time
 from urllib.parse import urlsplit, parse_qs
 import uuid
 
-from . import cli, metadata
+from . import cli, metadata, music
 from .lyrics.guides import workshop
 from .lyrics.importer import import_lyrics
 from .domain.section import text
@@ -102,11 +102,16 @@ class Studio:
                 raise ValueError("입력 형식이 올바르지 않습니다.")
             data = {k: payload.get(k, v) for k, v in DEFAULTS.items()}
             if "song" in payload:
-                if any(k in payload for k in ("title", "style", "lyrics", "compiled_lyrics")):
+                if any(k in payload for k in ("title", "style", "lyrics", "compiled_lyrics", "music_settings")):
                     raise ValueError("Song과 평면 입력을 동시에 보낼 수 없습니다.")
                 data.update(metadata.generation_input(payload["song"]))
             else:
                 data.update({k: payload.get(k) for k in ("title", "style", "lyrics")})
+                if "music_settings" in payload:
+                    if "style" in payload:
+                        raise ValueError("음악 설정과 style을 동시에 보낼 수 없습니다.")
+                    data["music_settings"] = music.validate_settings(payload["music_settings"])
+                    data["style"] = music.compile_style(data["music_settings"])
             config, parent = self.config, None
         cli.validate_input(data)
         if len(data["title"]) > 160:
@@ -194,7 +199,9 @@ def make_handler(studio):
                 return
             url = urlsplit(self.path)
             try:
-                if url.path == "/api/advisor":
+                if url.path == "/api/music/guide":
+                    self.respond(music.guide())
+                elif url.path == "/api/advisor":
                     self.respond(studio.advisor.status())
                 elif url.path == "/api/workshop":
                     self.respond(workshop())
@@ -218,6 +225,7 @@ def make_handler(studio):
                 else:
                     files = {"/": ("index.html", "text/html; charset=utf-8"),
                              "/song-editor.js": ("song-editor.js", "text/javascript; charset=utf-8"),
+                             "/music-guide.js": ("music-guide.js", "text/javascript; charset=utf-8"),
                              "/app.js": ("app.js", "text/javascript; charset=utf-8"),
                              "/style.css": ("style.css", "text/css; charset=utf-8"),
                              "/font.ttf": ("font.ttf", "font/ttf"),
@@ -307,6 +315,13 @@ def make_handler(studio):
                     raise ValueError("잘못된 입력입니다.")
                 if self.path in ("/api/tracks/rename", "/api/tracks/delete", "/api/tracks/restore"):
                     self.respond(studio.manage_track(self.path.rsplit("/", 1)[1], data.get("id"), data.get("title")))
+                    return
+                if self.path == "/api/music/preview":
+                    settings = music.validate_settings(data.get("music_settings"))
+                    self.respond({"music_settings": settings, "style": music.compile_style(settings)})
+                    return
+                if self.path == "/api/music/advice":
+                    self.respond(music.advise(studio.advisor, data.get("music_settings"), data.get("title", "")))
                     return
                 if self.path == "/api/advisor":
                     self.respond(studio.advisor.request(data.get("action"), data.get("section"), data.get("context", {})))

@@ -33,7 +33,7 @@ class SongEditor {
       try{const status=await this.api('/api/advisor');this.aiConfigured=status.configured;this.aiModel=status.model;this.paintAdvice();}catch{this.aiConfigured=false;this.paintAdvice();}
     }catch(e){document.getElementById('editor-error').textContent='가이드 연결 실패: '+e.message;}
   }
-  song(){return {schema_version:2,title:document.getElementById('title').value.trim(),sections:copy(this.sections),music_settings:{advanced_prompt:document.getElementById('style').value.trim()}};}
+  song(){return {schema_version:2,title:document.getElementById('title').value.trim(),sections:copy(this.sections),music_settings:root.musicGuide.settings()};}
   draft(){return {mode:this.mode,sections:copy(this.sections),raw:document.getElementById('lyrics').value};}
   load(data){
     this.revision++;this.advice.clear();clearTimeout(this.timer);this.removed=null;
@@ -129,7 +129,7 @@ class SongEditor {
     const section=this.sections.find(s=>s.id===id);if(!section)return;
     const entry={revision:this.revision,action,items:[],loading:true};this.advice.set(id,entry);this.aiBusy=true;this.paintAdvice();
     try{
-      const response=await this.api('/api/advisor',{action,section:copy(section),context:{title:document.getElementById('title').value.trim(),style:document.getElementById('style').value.trim()}});
+      const response=await this.api('/api/advisor',{action,section:copy(section),context:{title:document.getElementById('title').value.trim(),style:root.musicGuide.style().slice(0,2000)}});
       entry.items=response.suggestions;
     }catch(e){entry.error=e.message;}
     finally{entry.loading=false;this.aiBusy=false;this.paintAdvice();}

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="ko">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Local Music Studio</title><link rel="stylesheet" href="/style.css"><script src="/song-editor.js" defer></script><script src="/app.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Local Music Studio</title><link rel="stylesheet" href="/style.css"><script src="/song-editor.js" defer></script><script src="/music-guide.js" defer></script><script src="/app.js" defer></script></head>
 <body>
 <header class="topbar"><a class="brand" href="/" aria-label="Local Music Studio 홈"><span class="brand-mark" aria-hidden="true">∿</span> LOCAL <span class="slash">/</span> MUSIC STUDIO</a><div class="connection"><span class="dot"></span><span id="connection">연결 중</span><span class="local-label">PRIVATE & LOCAL</span></div></header>
 <main>
@@ -18,9 +18,11 @@
 <div class="section-actions"><label>추가할 Section<select id="new-section-type"></select></label><button type="button" id="add-section" class="quiet-button" disabled>+ Section 추가</button><button type="button" id="undo-section" class="quiet-button" hidden>삭제 되돌리기</button></div></div>
 <p id="editor-error" role="alert"></p>
 </section>
-<div class="label-line"><label for="style">어떤 음악을 만들까요?</label><span>장르 · 분위기 · 보컬 · 악기</span></div>
-<textarea id="style" name="style" rows="3" maxlength="2000" required placeholder="예: Korean R&B, warm male vocal, electric piano">Korean, mellow R&B, warm male vocal, electric piano, soft bass, gentle drums</textarea>
+<section class="music-guide" aria-labelledby="music-heading"><h3 id="music-heading">Music Guide</h3><p class="music-note">원하는 음악을 직접 설계하세요. BPM·Key·악기는 생성 방향을 전달하며, 정확한 결과를 보장하지 않습니다.</p><div class="settings-grid"><div><label for="music-genre">Genre · 장르</label><input id="music-genre" maxlength="160" list="options-genre" placeholder="미정 · 선택 사항"><datalist id="options-genre"></datalist><details class="music-why"><summary>왜? · 설정 가이드</summary><p id="why-genre"></p></details></div><div><label for="music-bpm">BPM · 템포</label><input id="music-bpm" type="number" min="30" max="300" step="1" list="options-bpm" placeholder="미정 · 선택 사항"><datalist id="options-bpm"></datalist><details class="music-why"><summary>왜? · 설정 가이드</summary><p id="why-bpm"></p></details></div><div><label for="music-key">Key · 조성</label><input id="music-key" maxlength="160" list="options-key" placeholder="미정 · 선택 사항"><datalist id="options-key"></datalist><details class="music-why"><summary>왜? · 설정 가이드</summary><p id="why-key"></p></details></div><div><label for="music-moods">Mood · 분위기</label><input id="music-moods" maxlength="970" list="options-moods" placeholder="미정 · 선택 사항"><datalist id="options-moods"></datalist><details class="music-why"><summary>왜? · 설정 가이드</summary><p id="why-moods"></p></details></div><div><label for="music-vocal">Vocal · 보컬</label><input id="music-vocal" maxlength="160" list="options-vocal" placeholder="미정 · 선택 사항"><datalist id="options-vocal"></datalist><details class="music-why"><summary>왜? · 설정 가이드</summary><p id="why-vocal"></p></details></div><div><label for="music-instruments">Instruments · 악기</label><input id="music-instruments" maxlength="970" list="options-instruments" placeholder="미정 · 선택 사항"><datalist id="options-instruments"></datalist><details class="music-why"><summary>왜? · 설정 가이드</summary><p id="why-instruments"></p></details></div></div></section>
+<div class="label-line"><label for="style">추가 스타일 · 자유 입력</label><span>장르 · 분위기 · 보컬 · 악기</span></div>
+<textarea id="style" name="style" rows="3" maxlength="2000" placeholder="예: Korean R&B, warm male vocal, electric piano">Korean, mellow R&B, warm male vocal, electric piano, soft bass, gentle drums</textarea>
 <div class="presets" aria-label="스타일 프리셋"><button type="button" data-preset="rnb">새벽 R&B</button><button type="button" data-preset="lofi">비 오는 카페</button><button type="button" data-preset="pop">산뜻한 팝</button><button type="button" data-preset="acoustic">어쿠스틱</button></div>
+<details class="compile-panel" open><summary>YuE2 스타일 미리보기</summary><pre id="style-preview"></pre></details><p id="music-error" class="error" role="alert"></p><div class="music-advisor"><button type="button" id="music-advise" class="quiet-button" disabled>AI 음악 조언</button><p id="music-ai-status" class="music-note"></p><p id="music-advice-status" role="status"></p><div id="music-suggestions"></div></div>
 <div id="raw-lyrics"><div class="label-line"><label for="lyrics">가사</label><button type="button" id="example" class="text-button">예시 가사 불러오기 ↗</button></div>
 <textarea id="lyrics" name="lyrics" class="lyrics" rows="9" maxlength="12000" required spellcheck="false" placeholder="[Verse]와 [Chorus]로 나누어 가사를 입력하세요.">[Verse]
 강물 위로 번져 가는 불빛 사이로
@@ -37,7 +39,7 @@
 <div><label for="timeout">제한 시간 (초)</label><input id="timeout" type="number" min="1" max="86400" value="1800" required></div></div><p>같은 시드와 설정으로 결과를 비교할 수 있어요. 곡 길이는 가사와 모델에 따라 달라집니다.</p></details>
 <div id="form-error" class="error" role="alert" hidden></div>
 <button class="generate" id="generate" type="submit">음악 만들기 <span aria-hidden="true">↗</span></button>
-<p class="privacy-note">음원은 이 PC에서 생성·저장합니다. AI 가사 요청은 Gemini로 전송합니다.</p>
+<p class="privacy-note">음원은 이 PC에서 생성·저장합니다. AI 가사·음악 조언 요청은 Gemini로 전송합니다.</p>
 </form>
 </section>
 <section class="library" aria-labelledby="library-title">

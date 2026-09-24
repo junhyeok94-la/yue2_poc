@@ -3,6 +3,12 @@
 Windows / RTX 3060 12GB에서 YuE2 GGUF를 실행하는 로컬 음악 생성 웹 스튜디오와 CLI.
 Python은 실행·이력 관리에만 사용하고 실제 추론은 audio.cpp CUDA가 수행합니다.
 
+## v0.5 Music Guide
+
+BPM·Key·Genre·Mood·Vocal·Instruments를 선택하고 각 설정의 “왜?” 설명을 볼 수 있습니다.
+자유 입력과 합쳐진 YuE2 스타일을 미리 확인하며, Gemini 조언은 사용자가 선택한 항목만 적용합니다.
+[사용법·데이터/API·검증 결과](docs/08-v0.5-music-guide.md).
+
 ## v0.4 Gemini AI Lyrics Assistant
 
 Section 카드에서 가사 검토·다음 행 제안을 요청하고 직접 적용하거나 무시할 수 있습니다.
