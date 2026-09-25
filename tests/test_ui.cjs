@@ -395,3 +395,63 @@ test('playlist manages an unselected track without selecting or playing it',asyn
   assert.equal(d.getElementById('selected-title').textContent,'재생 곡');assert.equal(plays,0);
  }finally{dom.window.close();}
 });
+
+
+test('draft status is independent of selected song, trash counts and workspace',async()=>{
+ const base={status:'succeeded',created_at:'2026-09-25',has_audio:true,wav:{duration_seconds:12},input:{title:'저장된 곡',style:'folk',lyrics:'저장된 가사',seed:7,steps:8,timeout:1800,cot:'off'}};
+ const library=[{...base,id:'root',song_id:'root',title:'선택 곡',version_kind:'original'},{...base,id:'child',song_id:'root',parent_id:'root',title:'삭제 곡',deleted:true,has_audio:false,version_kind:'remix'},{...base,id:'other',title:'다른 곡',version_kind:'original'}];
+ const {dom,w,d}=await setup({title:'편집 초안',style:'R&B',lyrics:'내 가사',cot:'full'},undefined,library);
+ try{
+  assert.equal(d.getElementById('status-title').textContent,'편집 초안');
+  assert.equal(d.getElementById('status-version').textContent,'Original Draft');
+  assert.equal(d.getElementById('status-selected-title').textContent,'선택 곡');
+  assert.match(d.getElementById('status-versions').textContent,/전체 2개 버전 · 휴지통 1개 포함/);
+  assert.equal(d.querySelector('.song-status #status-versions'),null);
+  input(w,d.getElementById('title'),'독립 초안');
+  const before=w.localStorage.getItem('music-studio-draft-v3'),status=d.querySelector('.song-status').textContent;
+  Array.from(d.querySelectorAll('.track')).find(b=>b.getAttribute('aria-label')==='다른 곡 선택').click();
+  for(const name of ['compose','arrange','versions','write'])d.getElementById('tab-'+name).click();
+  assert.equal(w.localStorage.getItem('music-studio-draft-v3'),before);
+  assert.equal(d.querySelector('.song-status').textContent,status);
+  assert.equal(d.getElementById('status-selected-title').textContent,'다른 곡');
+  assert.match(d.getElementById('status-versions').textContent,/전체 1개 버전/);
+  assert.match(d.getElementById('generate-summary').textContent,/Melody \+ Harmony/);
+  d.getElementById('use-score').checked=true;d.getElementById('use-score').dispatchEvent(new w.Event('change',{bubbles:true}));
+  assert.match(d.getElementById('status-arrange').textContent,/ABC Override/);
+ }finally{dom.window.close();}
+});
+test('empty selection and presence indicators do not imply validation completed',async()=>{
+ const {dom,w,d}=await setup({title:'초안',lyrics:'',style:'',cot:'off'},undefined,[]);
+ try{
+  assert.equal(d.getElementById('status-selected-title').textContent,'선택된 곡 없음');
+  assert.equal(d.getElementById('status-versions').textContent,'');
+  assert.doesNotMatch(d.getElementById('status-write').textContent,/✓/);
+  assert.doesNotMatch(d.getElementById('status-compose').textContent,/✓/);
+  input(w,d.getElementById('lyrics'),'가사');input(w,d.getElementById('music-bpm'),'301');
+  assert.match(d.getElementById('status-write').textContent,/가사 입력됨/);
+  assert.match(d.getElementById('status-compose').textContent,/설정됨/);
+  assert.equal(d.getElementById('music-bpm').validity.valid,false);
+  assert.equal(d.querySelectorAll('#generate-summary dt').length,4);
+  assert.equal(d.querySelector('.generate-action').closest('[role=tabpanel]'),null);
+  assert.equal(d.querySelector('.player').closest('#composer'),null);
+ }finally{dom.window.close();}
+});
+test('long text, deep lineage, orphan and cycles retain every version once',async()=>{
+ const title='새벽 두 시 한강을 달리며 오래전 헤어진 사람을 다시 떠올리는 이야기';
+ const style='Korean alternative R&B, warm nostalgic late-night atmosphere, soft intimate male vocal, electric piano, Rhodes, ambient synth pad, muted bass, brushed drums';
+ const kinds=['original','variation','lyrics_revision','score_revision','remix','variation'];
+ const library=kinds.map((kind,i)=>({id:'v'+i,song_id:'v0',parent_id:i?'v'+(i-1):null,version_kind:kind,title:title+i,status:'succeeded',created_at:'2026-09-25',has_audio:true,wav:{duration_seconds:1},input:{title,style,lyrics:'가'.repeat(11990),seed:7,steps:8,timeout:1800,cot:'melody'}}));
+ library.push({...library[0],id:'orphan',parent_id:'missing'},{...library[0],id:'cycle-a',parent_id:'cycle-b'},{...library[0],id:'cycle-b',parent_id:'cycle-a'});
+ const {dom,d}=await setup({title,style,lyrics:'가'.repeat(11990),score_editor:{text:'K:C\n'+'C '.repeat(11990),enabled:true}},undefined,library);
+ try{
+  assert.equal(d.querySelector('.track strong').textContent,title+'0');
+  assert.equal(d.querySelector('.style-preview').textContent,style);
+  assert.equal(d.querySelectorAll('[data-version-id]').length,9);
+  assert.equal(new Set(Array.from(d.querySelectorAll('[data-version-id]'),b=>b.dataset.versionId)).size,9);
+  assert.equal(d.querySelector('.version-tree ul ul ul ul'),null);
+  assert.match(d.getElementById('version-list').textContent,/부모: 기록 없음/);
+  assert.equal(d.querySelector('[data-version-id="v0"]').getAttribute('aria-pressed'),'true');
+  assert.match(d.getElementById('generate-summary').textContent,/11,990자/);
+  assert.equal(d.getElementById('abc').value.length,23984);
+ }finally{dom.window.close();}
+});

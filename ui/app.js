@@ -262,19 +262,28 @@ function revealGenerationError(failure){
   else if(['music_settings','advanced_prompt','genre','bpm','key','moods','vocal','instruments','style'].includes(field))revealControl($('music-'+field)||$('style'));
   else if(/ABC|cot|seed|steps|timeout/i.test(failure.message))revealControl(/ABC/i.test(failure.message)?$('abc'):$('cot'));
 }
+function selectedFamilySummary(current){
+  const family=tracks.filter(t=>(t.song_id||t.id)===(current.song_id||current.id));
+  const trashed=family.filter(t=>t.deleted).length;
+  return '전체 '+family.length+'개 버전'+(trashed?' · 휴지통 '+trashed+'개 포함':'');
+}
 function renderSongStatus(){
   const lyrics=editor.mode==='sections'?editor.sections.map(s=>s.lyrics.join('\n')).join('\n'):$('lyrics').value;
   const hasLyrics=!!lyrics.trim(),hasMusic=!!music.style().trim();
-  const current=tracks.find(t=>t.id===selectedId);const count=current?tracks.filter(t=>(t.song_id||t.id)===(current.song_id||current.id)).length:0;
+  const current=tracks.find(t=>t.id===selectedId);
+  const planning=$('use-score').checked?'ABC Override':({off:'Optional',melody:'Melody Planning',full:'Melody + Harmony'}[$('cot').value]||'Optional');
   $('status-title').textContent=$('title').value.trim()||'제목 없는 초안';
-  $('status-version').textContent='현재 초안 · '+(versionDraft?versionLabels[versionDraft.kind]||'Version':'Original');
-  $('status-write').textContent='WRITE '+(hasLyrics?'✓ 가사 작성됨':'· 가사 작성');
+  $('status-version').textContent=(versionDraft?versionLabels[versionDraft.kind]||'Version':'Original')+' Draft';
+  $('status-write').textContent='WRITE '+(hasLyrics?'✓ 가사 입력됨':'· 가사 작성');
   $('status-compose').textContent='COMPOSE '+(hasMusic?'✓ 음악 설정됨':'· 음악 설정');
-  $('status-arrange').textContent='ARRANGE '+($('use-score').checked?'· ABC 사용':$('cot').value==='off'?'· 선택 사항':'· 계획 사용');
-  $('status-versions').textContent='VERSIONS · '+(current?'선택 곡 '+count+'개':'곡 선택 후 비교');
+  $('status-arrange').textContent='ARRANGE · '+planning;
+  $('status-selected-title').textContent=current?current.title:'선택된 곡 없음';
+  $('status-versions').textContent=current?(versionLabels[current.version_kind]||'Original')+' · '+selectedFamilySummary(current)+(current.deleted?' · 선택 곡은 휴지통에 있음':''):'';
+  $('selected-version').textContent=current?(versionLabels[current.version_kind]||'Original')+' · '+selectedFamilySummary(current):'';
   const structure=editor.mode==='sections'?(editor.sections.map(s=>s.label).join(' → ')||'Section 없음'):'원문 가사';
   const settings=music.settings(),direction=[settings.genre,settings.bpm?settings.bpm+' BPM':'',settings.key].filter(Boolean).join(' · ')||'자유 스타일';
-  $('generate-summary').textContent='현재 초안 · '+structure+'\n'+direction+' · 가사 '+lyrics.length+'자 · '+$('cot').selectedOptions[0].textContent;
+  const rows=[['구조',structure],['음악',direction],['가사',lyrics.length.toLocaleString()+'자'],['계획',planning]];
+  $('generate-summary').replaceChildren(...rows.map(([label,value])=>{const row=element('div','');row.append(element('dt','',label),element('dd','',value));return row;}));
 }
 function arrangeVersionTree(family){
   const buttons=new Map(Array.from($('version-list').children).map(b=>[b.dataset.versionId,b]));
@@ -284,7 +293,7 @@ function arrangeVersionTree(family){
   function append(track,host,depth){
     if(visited.has(track.id))return;visited.add(track.id);const row=element('li','');row.append(buttons.get(track.id));host.append(row);
     if(track.parent_id){const parent=family.find(t=>t.id===track.parent_id);row.append(element('span','version-parent','부모: '+(parent?.title||'기록 없음')));}
-    const descendants=children.get(track.id)||[];if(descendants.length){const nested=depth<5?element('ul',''):host;if(depth<5)row.append(nested);for(const child of descendants)append(child,nested,depth+1);}
+    const descendants=children.get(track.id)||[];if(descendants.length){const nested=depth<3?element('ul',''):host;if(depth<3)row.append(nested);for(const child of descendants)append(child,nested,depth+1);}
   }
   for(const t of children.get(null)||[])append(t,root,0);
   for(const t of family)if(!visited.has(t.id))append(t,root,0);
