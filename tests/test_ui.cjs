@@ -30,6 +30,11 @@ if(advisor&&p==='/api/advisor'){return {ok:true,json:async()=>options?.body?advi
  await until(()=>w.document.getElementById('connection').textContent==='로컬 스튜디오 연결됨');
  return {dom,w,d:w.document,jobs};}catch(e){dom.window.close();throw e;}
 }
+async function answerDraft(d,accepted){
+ await until(()=>d.getElementById('draft-confirm-dialog').open);
+ d.getElementById(accepted?'apply-draft-confirm':'cancel-draft-confirm').click();
+ await Promise.resolve();
+}
 function input(w,el,value){el.value=value;el.dispatchEvent(new w.Event('input',{bubbles:true}));}
 test('structure editing, Korean composition, guide, delete undo, compile and submit',async()=>{
  const {dom,w,d,jobs}=await setup();
@@ -280,8 +285,8 @@ test('version family, branch draft, detach, comparison and alternating audio',as
   d.getElementById('listen-before').click();assert.equal(d.getElementById('audio').getAttribute('src'),'/api/audio?id='+encodeURIComponent(root));
   assert.equal(d.getElementById('selected-title').textContent,'수정본');
   d.getElementById('listen-after').click();assert.equal(d.getElementById('audio').getAttribute('src'),'/api/audio?id='+encodeURIComponent(child));
-  w.confirm=()=>false;d.getElementById('branch-version').click();assert.equal(d.getElementById('version-draft').hidden,true);
-  w.confirm=()=>true;d.getElementById('version-kind').value='remix';d.getElementById('branch-version').click();
+  d.getElementById('branch-version').click();await answerDraft(d,false);assert.equal(d.getElementById('version-draft').hidden,true);
+  d.getElementById('version-kind').value='remix';d.getElementById('branch-version').click();await answerDraft(d,true);
   assert.equal(d.getElementById('version-draft').hidden,false);assert.equal(d.getElementById('lyrics').value,'수정 가사');
   input(w,d.getElementById('style'),'Jazz');
   const draft=JSON.parse(w.localStorage.getItem('music-studio-draft-v3'));assert.equal(draft.version.parent_id,child);
@@ -290,7 +295,7 @@ test('version family, branch draft, detach, comparison and alternating audio',as
   d.getElementById('composer').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await until(()=>jobs.length===1);
   assert.deepEqual(jobs[0].version,{parent_id:child,kind:'remix'});assert.equal(jobs[0].style,'Jazz');
   assert.equal(library[0].input.style,'Korean R&B');
-  d.getElementById('reuse').click();assert.equal(d.getElementById('version-draft').hidden,true);
+  d.getElementById('reuse').click();await answerDraft(d,true);assert.equal(d.getElementById('version-draft').hidden,true);
  }finally{dom.window.close();}
 });
 
@@ -302,8 +307,8 @@ test('score edit version, explicit use, mode validation, draft restore and reque
  try{
   assert.equal(d.getElementById('view-score').hidden,false);
   d.getElementById('view-score').click();await until(()=>d.getElementById('score-content').textContent.includes('K:C'));
-  w.confirm=()=>false;d.getElementById('edit-score').click();await new Promise(r=>setTimeout(r,20));assert.equal(d.getElementById('abc').value,'');
-  w.confirm=()=>true;d.getElementById('edit-score').click();await until(()=>d.getElementById('use-score').checked);
+  d.getElementById('edit-score').click();await answerDraft(d,false);assert.equal(d.getElementById('abc').value,'');
+  d.getElementById('edit-score').click();await answerDraft(d,true);await until(()=>d.getElementById('use-score').checked);
   assert.ok(d.getElementById('version-source').textContent.includes('Score Revision'));
   input(w,d.getElementById('abc'),'X:1\nM:4/4\nQ:1/4=100\nK:C\nD E F G |');
   d.getElementById('inspect-score').click();await until(()=>d.getElementById('score-analysis').textContent.includes('100'));
@@ -453,5 +458,26 @@ test('long text, deep lineage, orphan and cycles retain every version once',asyn
   assert.equal(d.querySelector('[data-version-id="v0"]').getAttribute('aria-pressed'),'true');
   assert.match(d.getElementById('generate-summary').textContent,/11,990자/);
   assert.equal(d.getElementById('abc').value.length,23984);
+ }finally{dom.window.close();}
+});
+
+
+test('draft confirmation keeps edits until apply, restores focus and rejects changed selection',async()=>{
+ const base={status:'succeeded',created_at:'2026-09-25',has_audio:true,wav:{duration_seconds:12},input:{title:'원본',style:'folk',lyrics:'원본 가사',seed:7,steps:8,timeout:1800,cot:'off'}};
+ const library=[{...base,id:'one',title:'원본'},{...base,id:'two',title:'다른 곡'}];
+ const {dom,w,d}=await setup({title:'보존할 초안',style:'R&B',lyrics:'내 가사'},undefined,library);
+ try{
+  w.confirm=()=>{throw new Error('Native confirm must not be used for draft replacement');};
+  const trigger=d.getElementById('branch-version'),dialog=d.getElementById('draft-confirm-dialog');
+  trigger.focus();trigger.click();
+  assert.equal(dialog.open,true);assert.equal(d.activeElement.id,'cancel-draft-confirm');
+  assert.equal(d.getElementById('lyrics').value,'내 가사');
+  dialog.dispatchEvent(new w.Event('cancel',{cancelable:true}));await Promise.resolve();
+  assert.equal(dialog.open,false);assert.equal(d.activeElement,trigger);assert.equal(d.getElementById('lyrics').value,'내 가사');
+  trigger.click();trigger.click();
+  d.querySelector('button[aria-label="다른 곡 선택"]').click();await answerDraft(d,true);
+  assert.equal(d.getElementById('lyrics').value,'내 가사');assert.equal(d.getElementById('version-draft').hidden,true);
+  d.getElementById('reuse').click();await answerDraft(d,false);assert.equal(d.getElementById('title').value,'보존할 초안');
+  d.getElementById('reuse').click();await answerDraft(d,true);assert.equal(d.getElementById('lyrics').value,'원본 가사');
  }finally{dom.window.close();}
 });

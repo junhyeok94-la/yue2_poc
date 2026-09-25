@@ -20,6 +20,31 @@ const presetStyles = {
 };
 const exampleLyrics = '[Verse]\n강물 위로 번져 가는 불빛 사이로\n오늘의 기억을 천천히 내려놓아\n\n[Chorus]\n조금 더 달려도 괜찮아\n새벽 끝엔 다시 아침이 오니까';
 const clock = seconds => {const n=Math.max(0,Math.floor(seconds||0));return `${Math.floor(n/60)}:${String(n%60).padStart(2,'0')}`;};
+let draftConfirmation=null;
+function confirmDraftReplacement(message){
+  if(draftConfirmation)return Promise.resolve(false);
+  const dialog=$('draft-confirm-dialog'),trigger=document.activeElement;
+  $('draft-confirm-message').textContent=message;
+  return new Promise(resolve=>{
+    draftConfirmation={resolve,trigger};dialog.showModal();$('cancel-draft-confirm').focus();
+  });
+}
+function finishDraftConfirmation(accepted){
+  if(!draftConfirmation)return;
+  const {resolve,trigger}=draftConfirmation;draftConfirmation=null;
+  $('draft-confirm-dialog').close();
+  if(trigger?.isConnected)trigger.focus({preventScroll:true});
+  resolve(accepted);
+}
+$('cancel-draft-confirm').onclick=()=>finishDraftConfirmation(false);
+$('apply-draft-confirm').onclick=()=>finishDraftConfirmation(true);
+$('draft-confirm-dialog').addEventListener('cancel',event=>{event.preventDefault();finishDraftConfirmation(false);});
+$('draft-confirm-dialog').addEventListener('close',()=>{if(!$('draft-confirm-dialog').open)finishDraftConfirmation(false);});
+function draftSourceStillAvailable(track){
+  const current=tracks.find(t=>t.id===track.id);
+  if(!current||current.deleted||current.status==='running'||selectedId!==track.id||busy){notify('선택 곡의 상태가 바뀌었습니다. 다시 선택해 주세요.');return false;}
+  return true;
+}
 function notify(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,4000);}
 function error(message){$('form-error').textContent=message||'';$('form-error').hidden=!message;}
 function count(){renderSongStatus(); $('char-count').textContent=`${$('lyrics').value.length.toLocaleString()} / 12,000`; }
@@ -113,7 +138,7 @@ async function submit(path,data){
 $('composer').addEventListener('submit',event=>{event.preventDefault();const invalid=Array.from($('composer').elements).find(control=>control.willValidate&&!control.validity.valid);if(invalid){revealControl(invalid);invalid.reportValidity();return;}const data=inputs();if(data.abc!==undefined&&$('cot').value==='off'){error('ABC 악보를 사용하려면 멜로디 또는 멜로디 + 화성 계획 모드를 선택하세요.');revealControl($('cot'));return;}if(!flatInputs().style.trim()&&Object.keys(music.settings()).length===1){error('원하는 음악 스타일을 입력해 주세요.');revealControl($('style'));return;}if(editor.mode==='raw'&&!data.lyrics.trim()){error('노래에 사용할 가사를 입력해 주세요.');revealControl($('lyrics'));return;}saveDraft();submit('/api/jobs',data);});
 $('composer').addEventListener('input',event=>{if(event.target.closest('#versions-content,#selected-score'))return;if(!event.target.closest('#section-cards')){music.changed();count();saveDraft();editor.changed();}});
 $('composer').addEventListener('change',saveDraft);
-$('reuse').addEventListener('click',()=>{const track=tracks.find(t=>t.id===selectedId);if(track&&confirm('현재 초안을 선택한 곡의 가사와 설정으로 바꿀까요?')){fill(track.input);setWorkspace('write');saveDraft();$('title').focus();$('composer').scrollIntoView({behavior:'smooth',block:'start'});notify('가사와 설정을 가져왔어요. 수정해서 새 곡을 만들어 보세요.');}});
+$('reuse').addEventListener('click',async()=>{const track=tracks.find(t=>t.id===selectedId);if(track&&await confirmDraftReplacement('“'+track.title+'”의 가사와 설정을 현재 초안으로 가져올까요?')&&draftSourceStillAvailable(track)){fill(track.input);setWorkspace('write');saveDraft();$('title').focus();$('composer').scrollIntoView({behavior:'smooth',block:'start'});notify('가사와 설정을 가져왔어요. 수정해서 새 곡을 만들어 보세요.');}});
 $('replay').addEventListener('click',()=>{if(selectedId)submit('/api/replay',{id:selectedId});});
 document.querySelectorAll('[data-preset]').forEach(button=>button.addEventListener('click',()=>{$('style').value=presetStyles[button.dataset.preset];music.changed();saveDraft();editor.changed();}));
 $('example').addEventListener('click',()=>{if($('lyrics').value.trim()&&$('lyrics').value!==exampleLyrics&&!confirm('현재 가사를 예시 가사로 바꿀까요?'))return;$('lyrics').value=exampleLyrics;count();saveDraft();editor.changed();});
@@ -177,7 +202,7 @@ $('view-score').onclick=async()=>{
 $('edit-score').onclick=async()=>{
   const track=tracks.find(t=>t.id===selectedId);if(!track?.has_score||track.deleted||busy)return;
   try{const result=await api('/api/score?id='+encodeURIComponent(track.id));if(track.id!==selectedId)return;
-    if(!confirm('현재 초안을 이 곡의 가사·설정·악보로 바꾸고 악보 수정 버전을 준비할까요?'))return;
+    if(!await confirmDraftReplacement('“'+track.title+'”의 가사·설정·악보로 초안을 바꾸고 Score Revision을 준비할까요?')||!draftSourceStillAvailable(track))return;
     fill(track.input);$('abc').value=result.abc;$('use-score').checked=true;
     if($('cot').value==='off')$('cot').value='full';
     versionDraft={parent_id:track.id,kind:'score_revision',title:track.title};paintVersionDraft();saveDraft();
@@ -190,10 +215,11 @@ function paintVersionDraft(){
   $('version-source').textContent=versionDraft?`${versionLabels[versionDraft.kind]||'Version'} · ${versionDraft.title||versionDraft.parent_id}에서 시작`:'';
 }
 $('detach-version').onclick=()=>{versionDraft=null;paintVersionDraft();saveDraft();};
-$('branch-version').onclick=()=>{
+$('branch-version').onclick=async()=>{
   const track=tracks.find(t=>t.id===selectedId);if(!track||track.deleted||busy||track.status==='running')return;
-  if(!confirm('현재 초안을 선택한 곡의 가사·설정으로 바꾸고 새 버전을 준비할까요?'))return;
-  fill(track.input);versionDraft={parent_id:track.id,kind:$('version-kind').value,title:track.title};
+  const kind=$('version-kind').value;
+  if(!await confirmDraftReplacement('“'+track.title+'”의 가사·설정으로 초안을 바꾸고 '+versionLabels[kind]+'을 준비할까요?')||!draftSourceStillAvailable(track))return;
+  fill(track.input);versionDraft={parent_id:track.id,kind,title:track.title};
   paintVersionDraft();setWorkspace(versionDraft.kind==='lyrics_revision'?'write':versionDraft.kind==='score_revision'?'arrange':'compose');saveDraft();$('composer').scrollIntoView({behavior:'smooth',block:'start'});notify('초안을 편집한 뒤 음악 만들기를 누르면 새 버전으로 저장합니다.');
 };
 function renderVersions(){
